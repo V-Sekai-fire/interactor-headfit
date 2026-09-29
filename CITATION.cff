@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: If you use these kernels, cite ANNY, whose head they fit.
+title: Head-fit kernels (Lean-emitted) -- fitting ANNY's head to an avatar face
+abstract: >-
+  lean/HeadFit/SlangCodegen/*.lean write, as LeanSlang compute kernels, the
+  blend of ANNY's macro and local targets and its backward, the similarity
+  (rigid + scale) and its VJPs, the point-to-surface and landmark residuals,
+  the prior, a df32 energy sum, and the barycentric resample that carries a
+  fitted action onto the avatar (RFD 2275, RFD 2277). They are written here;
+  no ANNY source is copied. The phenotype anchor rule restates
+  anny-creator's scripts/anny_coeffs.gd, checked against it in Godot
+  (gates/11-headfit). lake exe emit_headfit writes the Slang and the pins;
+  gen.sh compiles cpp and SPIR-V and embed_spv.exs embeds it (no Python).
+type: software
+authors:
+  - name: NAVER LABS Europe
+repository-code: https://github.com/naver/anny
+license: Apache-2.0
+references:
+  - type: software
+    title: ANNY
+    authors:
+      - name: NAVER LABS Europe
+    repository-code: https://github.com/naver/anny
+    commit: fed2f9a23f065dead04fdb180f0b9ebee2ca0b0f
+    license: Apache-2.0
+  - type: software
+    title: anny-creator (scripts/anny_coeffs.gd, the phenotype anchor rule)
+    authors:
+      - name: V-Sekai-fire
+    commit: fe83d6537156f09454af873fdf3158143d3f7862
