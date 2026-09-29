@@ -1,0 +1,57 @@
+cff-version: 1.2.0
+message: If you use this guest, cite ANNY and MakeHuman's MPFB2, whose data it reads, and the name sources of unified_expressions.map.
+title: headfit.elf -- ANNY head fit and unified-expression transfer (sandbox guest)
+abstract: >-
+  The host uploads ANNY's data as job data (the guest has no filesystem):
+  mpfb2/3dobjs/base.obj, mpfb2/targets/macrodetails (348 targets),
+  mpfb2/targets/expression/units (34 units per race), and
+  faceunits01/targets/faceunits (52 actions), read directly with no Python.
+  local_dials.txt is generated from mpfb2/targets/target.json by
+  local_dials.exs. unified_expressions.map takes its 160 names from two
+  sources: the VRCFT Unified Expressions animation templates (the
+  blendShape names they drive) and the FT_* enum of Godot's
+  XRFaceModifier3D, in CamelCase. Only the names are taken; no template
+  animation or engine code is copied.
+type: software
+authors:
+  - name: V-Sekai-fire
+license: MIT
+references:
+  - type: data
+    title: ANNY faceunits01 (the 52 facial actions, src/anny/data/faceunits01)
+    authors:
+      - name: NAVER LABS Europe
+    repository-code: https://github.com/naver/anny
+    commit: fed2f9a23f065dead04fdb180f0b9ebee2ca0b0f
+    license: Apache-2.0
+    notes: >-
+      Under ANNY's top-level Apache-2.0 licence, as ANNY distributes it. No
+      licence file sits beside the data. Added in b561b37 ("faceunits data",
+      2026-06-22) inside mpfb2/ and moved out in e9e0a76. The name matches
+      MakeHuman's community faceunits01 asset, so an upstream MakeHuman
+      origin (usually CC0) is possible but unconfirmed.
+  - type: software
+    title: ANNY (data under src/anny/data)
+    authors:
+      - name: NAVER LABS Europe
+    repository-code: https://github.com/naver/anny
+    commit: fed2f9a23f065dead04fdb180f0b9ebee2ca0b0f
+    license: Apache-2.0
+  - type: data
+    title: MakeHuman MPFB2 targets and base mesh (as shipped in ANNY's mpfb2/)
+    authors:
+      - name: MakeHuman Community
+    license: CC0-1.0
+  - type: software
+    title: VRCFT Templates (Unified Expressions animation names)
+    authors:
+      - name: Adjerry91
+    version: 7.0.5
+    license: MIT
+  - type: software
+    title: Godot Engine, XRFaceModifier3D (the FT_* face tracker names)
+    authors:
+      - name: Godot Engine contributors
+    repository-code: https://github.com/godotengine/godot
+    commit: 97dab7a638ae8b613dcf6e657f93f020471d9040
+    license: MIT
