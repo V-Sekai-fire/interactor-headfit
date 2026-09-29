@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: If you use this oracle, cite LBFGSpp and Eigen, which it solves with.
+title: Head-fit oracle (host-native test, not vendored)
+abstract: >-
+  gen.cpp is written here; nothing is vendored. build.sh clones
+  V-Sekai-fire/interactor-aria-lbfgspp at the pinned commit (LBFGSpp 0.3.0, MIT;
+  Eigen 3.4.90, MPL-2.0) into .deps/ (gitignored), or uses the clone ARIA names
+  after checking it is at that commit, and compiles gen.cpp against them
+  unmodified. The only local adaptation is wrapping the LBFGSB.h include in
+  `#define private public`, as tests/lbfgsb_oracle and tests/cage_oracle do.
+  Neither library is linked into any guest ELF.
+type: software
+authors:
+  - name: V-Sekai-fire
+  - name: chibifire
+references:
+  - type: software
+    title: interactor-aria-lbfgspp
+    repository-code: https://github.com/V-Sekai-fire/interactor-aria-lbfgspp
+    commit: 10086b6b2022802d7942ba16842c43063b3cff91
