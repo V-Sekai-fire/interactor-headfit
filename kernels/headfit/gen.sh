@@ -19,6 +19,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
+ANNY="${ANNY_KERNELS_ROOT:-$(cd "$ROOT/../../2-contract/anny-kernels" && pwd)}"
 LEAN="${CLOTH_LEAN:-$ROOT/lean}"
 BUILD="${BUILD_DIR:-$ROOT/build}"
 SPV="$BUILD/spv-headfit"
@@ -56,7 +57,7 @@ fi
 
 # The inline prelude a reference (Windows) slangc writes, taken from a committed
 # emit of another family: everything above the emit body.
-REF="$ROOT/kernels/anny/cpp/anny_blend_emit.cpp"
+REF="$ANNY/kernels/anny/cpp/anny_blend_emit.cpp"
 PRELUDE="$(mktemp)"
 awk '/^#ifdef SLANG_PRELUDE_NAMESPACE$/ { getline nxt; if (nxt ~ /^using namespace/) exit; print; print nxt; next } { print }' "$REF" \
 	| sed '$d' > "$PRELUDE"
