@@ -1,0 +1,213 @@
+# unified_expressions.map -- unified-expression name <= source, one line per name (RFD 2275, RFD 2277).
+#
+# Names: the union of the 86 VRCFT Unified Expressions template shapes and Godot's
+# XRFaceModifier3D FT_* enum in CamelCase (160 names). Every name appears exactly once.
+#
+# Forms:
+#   Name <= action                        an ANNY faceunits action, transferred as is
+#   Name <= action * mask:left|right      the same, split by a side mask
+#   Name <= action * mask:upper|lower     split by a lip mask (masks chain with *)
+#   Name <= unit:<name>                   an ANNY MPFB2 expression unit (targets/expression/units/<race>/),
+#                                         folded across races by the fit's race weights, as the macros are
+#   Name <= a * -1                        a linear source at negative weight (the opposite motion)
+#   Name <= artist:<shape>                the avatar's own sculpt, kept as is
+#   Name <= material:<property>           a material parameter driven instead of a shape (e.g. a pupil scale)
+#   Name <= a + b [+ c ...]               a sum of any of the above
+#   Name <= procedural:<kind>             derived by the core (RFD 2275)
+#   Name <= corrective:A*B                the smallest displacement clearing A and B at parents = 1
+#   Name <= absent: <reason>              no honest source; audited and listed, never faked
+#
+# @stage 1 is the first testable release (RFD 2277): the head fit and ANNY's 52 actions.
+# @stage 2 is the next stage (RFD 2275): the tongue, the jaw interior, the correctives.
+# Artist names are the fixture avatar's (Mire: models/Mire). Blinks start from its wink sculpts
+# (RFD 2275), so ANNY's eyeBlink* go unused; so does tongueOut, the tongue being the artist's in
+# stage 2. Mire turns its eyes with bones and has no pupil-move sculpt, so gaze takes ANNY's eyeLook*;
+# pupil size is its two-eyed pupil sculpts.
+
+@stage 1
+
+# Brows
+BrowDownLeft <= browDownLeft
+BrowDownRight <= browDownRight
+BrowDown <= browDownLeft + browDownRight
+BrowLowererLeft <= browDownLeft
+BrowLowererRight <= browDownRight
+BrowInnerUp <= browInnerUp
+BrowInnerUpLeft <= browInnerUp * mask:left
+BrowInnerUpRight <= browInnerUp * mask:right
+BrowOuterUpLeft <= browOuterUpLeft
+BrowOuterUpRight <= browOuterUpRight
+BrowUpLeft <= browInnerUp * mask:left + browOuterUpLeft
+BrowUpRight <= browInnerUp * mask:right + browOuterUpRight
+BrowUp <= browInnerUp + browOuterUpLeft + browOuterUpRight
+BrowPinchLeft <= absent: no brow-pinch action among ANNY's 52 and no artist sculpt
+BrowPinchRight <= absent: no brow-pinch action among ANNY's 52 and no artist sculpt
+
+# Eyes: lids and pupil size from the artist, gaze and the rest from ANNY
+EyeClosedLeft <= artist:face_wink_L
+EyeClosedRight <= artist:face_wink_R
+EyeClosed <= artist:face_wink_L + artist:face_wink_R
+EyeWideLeft <= eyeWideLeft
+EyeWideRight <= eyeWideRight
+EyeWide <= eyeWideLeft + eyeWideRight
+EyeSquintLeft <= eyeSquintLeft
+EyeSquintRight <= eyeSquintRight
+EyeSquint <= eyeSquintLeft + eyeSquintRight
+EyeSqueezeLeft <= artist:face_wink_L + eyeSquintLeft + cheekSquintLeft
+EyeSqueezeRight <= artist:face_wink_R + eyeSquintRight + cheekSquintRight
+EyeLookUpLeft <= eyeLookUpLeft
+EyeLookUpRight <= eyeLookUpRight
+EyeLookDownLeft <= eyeLookDownLeft
+EyeLookDownRight <= eyeLookDownRight
+EyeLookInLeft <= eyeLookInLeft
+EyeLookInRight <= eyeLookInRight
+EyeLookOutLeft <= eyeLookOutLeft
+EyeLookOutRight <= eyeLookOutRight
+EyeDilation <= artist:eyePupil_grow
+EyeDilationLeft <= absent: the avatar's pupil sculpts move both eyes; it has no one-sided pupil sculpt
+EyeDilationRight <= absent: the avatar's pupil sculpts move both eyes; it has no one-sided pupil sculpt
+EyeConstrict <= artist:eyePupil_shrink
+EyeConstrictLeft <= absent: the avatar's pupil sculpts move both eyes; it has no one-sided pupil sculpt
+EyeConstrictRight <= absent: the avatar's pupil sculpts move both eyes; it has no one-sided pupil sculpt
+
+# Cheeks
+CheekPuff <= cheekPuff
+CheekPuffLeft <= cheekPuff * mask:left
+CheekPuffRight <= cheekPuff * mask:right
+CheekSquintLeft <= cheekSquintLeft
+CheekSquintRight <= cheekSquintRight
+CheekSquint <= cheekSquintLeft + cheekSquintRight
+CheekSuck <= absent: no cheek-suck action among ANNY's 52; puff reversed is not a suck
+CheekSuckLeft <= absent: no cheek-suck action among ANNY's 52; puff reversed is not a suck
+CheekSuckRight <= absent: no cheek-suck action among ANNY's 52; puff reversed is not a suck
+
+# Nose
+NoseSneerLeft <= noseSneerLeft
+NoseSneerRight <= noseSneerRight
+NoseSneer <= noseSneerLeft + noseSneerRight
+NasalDilationLeft <= unit:nose-left-dilatation
+NasalDilationRight <= unit:nose-right-dilatation
+NasalDilation <= unit:nose-left-dilatation + unit:nose-right-dilatation
+NasalConstrict <= unit:nose-compression
+NasalConstrictLeft <= unit:nose-compression * mask:left
+NasalConstrictRight <= unit:nose-compression * mask:right
+
+# Jaw (the shape; its lower teeth and tongue follow in stage 2)
+JawOpen <= jawOpen
+JawForward <= jawForward
+JawLeft <= jawLeft
+JawRight <= jawRight
+JawBackward <= jawForward * -1
+JawClench <= absent: a clench moves muscle under the jaw, not the lips; not among ANNY's 52
+JawMandibleRaise <= jawOpen * -1
+
+# Lips
+MouthClosed <= mouthClose
+MouthApeShape <= jawOpen + mouthClose
+MouthOpen <= mouthUpperUpLeft + mouthUpperUpRight + mouthLowerDownLeft + mouthLowerDownRight
+LipFunnel <= mouthFunnel
+LipFunnelUpper <= mouthFunnel * mask:upper
+LipFunnelLower <= mouthFunnel * mask:lower
+LipFunnelUpperLeft <= mouthFunnel * mask:upper * mask:left
+LipFunnelUpperRight <= mouthFunnel * mask:upper * mask:right
+LipFunnelLowerLeft <= mouthFunnel * mask:lower * mask:left
+LipFunnelLowerRight <= mouthFunnel * mask:lower * mask:right
+LipPucker <= mouthPucker
+LipPuckerUpper <= mouthPucker * mask:upper
+LipPuckerLower <= mouthPucker * mask:lower
+LipPuckerUpperLeft <= mouthPucker * mask:upper * mask:left
+LipPuckerUpperRight <= mouthPucker * mask:upper * mask:right
+LipPuckerLowerLeft <= mouthPucker * mask:lower * mask:left
+LipPuckerLowerRight <= mouthPucker * mask:lower * mask:right
+LipSuckUpper <= mouthRollUpper
+LipSuckLower <= mouthRollLower
+LipSuck <= mouthRollUpper + mouthRollLower
+LipSuckUpperLeft <= mouthRollUpper * mask:left
+LipSuckUpperRight <= mouthRollUpper * mask:right
+LipSuckLowerLeft <= mouthRollLower * mask:left
+LipSuckLowerRight <= mouthRollLower * mask:right
+LipSuckCornerLeft <= absent: no corner-roll action among ANNY's 52
+LipSuckCornerRight <= absent: no corner-roll action among ANNY's 52
+MouthRaiserUpper <= mouthShrugUpper
+MouthRaiserLower <= mouthShrugLower
+MouthPressLeft <= mouthPressLeft
+MouthPressRight <= mouthPressRight
+MouthPress <= mouthPressLeft + mouthPressRight
+MouthTightener <= unit:mouth-compression
+MouthTightenerLeft <= unit:mouth-compression * mask:left
+MouthTightenerRight <= unit:mouth-compression * mask:right
+
+# Mouth shift
+MouthLeft <= mouthLeft
+MouthRight <= mouthRight
+MouthUpperLeft <= mouthLeft * mask:upper
+MouthUpperRight <= mouthRight * mask:upper
+MouthLowerLeft <= mouthLeft * mask:lower
+MouthLowerRight <= mouthRight * mask:lower
+
+# Upper and lower lip
+MouthUpperUpLeft <= mouthUpperUpLeft
+MouthUpperUpRight <= mouthUpperUpRight
+MouthUpperUp <= mouthUpperUpLeft + mouthUpperUpRight
+MouthUpperDeepenLeft <= absent: no nasolabial-deepen action among ANNY's 52
+MouthUpperDeepenRight <= absent: no nasolabial-deepen action among ANNY's 52
+MouthLowerDownLeft <= mouthLowerDownLeft
+MouthLowerDownRight <= mouthLowerDownRight
+MouthLowerDown <= mouthLowerDownLeft + mouthLowerDownRight
+
+# Corners
+MouthSmileLeft <= mouthSmileLeft
+MouthSmileRight <= mouthSmileRight
+MouthSmile <= mouthSmileLeft + mouthSmileRight
+MouthCornerPullLeft <= mouthSmileLeft
+MouthCornerPullRight <= mouthSmileRight
+MouthCornerSlantLeft <= absent: no corner-slant action among ANNY's 52
+MouthCornerSlantRight <= absent: no corner-slant action among ANNY's 52
+MouthFrownLeft <= mouthFrownLeft
+MouthFrownRight <= mouthFrownRight
+MouthSadLeft <= mouthFrownLeft
+MouthSadRight <= mouthFrownRight
+MouthSad <= mouthFrownLeft + mouthFrownRight
+MouthStretchLeft <= mouthStretchLeft
+MouthStretchRight <= mouthStretchRight
+MouthStretch <= mouthStretchLeft + mouthStretchRight
+MouthDimpleLeft <= mouthDimpleLeft
+MouthDimpleRight <= mouthDimpleRight
+MouthDimple <= mouthDimpleLeft + mouthDimpleRight
+
+# Throat and neck
+NeckFlexLeft <= unit:neck-platysma * mask:left
+NeckFlexRight <= unit:neck-platysma * mask:right
+ThroatSwallow <= absent: the throat is interior and outside the head region the fit covers
+SoftPalateClose <= absent: the palate is interior; nothing on the surface moves
+
+@stage 2
+
+# Tongue: the artist's sculpts, then what the core derives in a tongue frame (tip, root, midline)
+TongueOut <= artist:mouth_tongue
+TongueOutStep1 <= procedural:out_step1
+TongueOutStep2 <= procedural:out_step2
+TongueUp <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueDown <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueLeft <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueRight <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueUpLeftMorph <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueUpRightMorph <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueDownLeftMorph <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueDownRightMorph <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueCurlUp <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueBlendDown <= absent: the avatar's one tongue sculpt, mouth_tongue, sticks it out; no other tongue pose
+TongueRoll <= procedural:roll
+TongueTwistLeft <= procedural:twist_left
+TongueTwistRight <= procedural:twist_right
+TongueFlat <= procedural:flat
+TongueSquish <= procedural:squish
+
+# Correctives: each clears the lid-through-brow and lid-past-lower-lid crossings at parents = 1
+EyeClosedBrowDownCorrectiveLeft <= corrective:EyeClosedLeft*BrowDownLeft
+EyeClosedBrowDownCorrectiveRight <= corrective:EyeClosedRight*BrowDownRight
+EyeClosedBrowInnerUpCorrective <= corrective:EyeClosed*BrowInnerUp
+EyeClosedBrowOuterUpCorrectiveLeft <= corrective:EyeClosedLeft*BrowOuterUpLeft
+EyeClosedBrowOuterUpCorrectiveRight <= corrective:EyeClosedRight*BrowOuterUpRight
+EyeClosedSquintCorrectiveLeft <= corrective:EyeClosedLeft*EyeSquintLeft
+EyeClosedSquintCorrectiveRight <= corrective:EyeClosedRight*EyeSquintRight
