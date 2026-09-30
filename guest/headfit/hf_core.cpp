@@ -14,7 +14,7 @@
 #include <memory>
 #include <sstream>
 
-#include "hf_geom.h"
+#include "common/hf_geom.h"
 #include "hf_kernels.h"
 #include "lbfgsb.h"
 #include "similarity.h"
