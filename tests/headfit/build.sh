@@ -10,13 +10,16 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 OUT="$ROOT/build/headfit_native"
+# The shared headers are a sibling checkout in the manifest layout.
+GUEST_COMMON=${GUEST_COMMON_ROOT:-$(cd "$ROOT/../../2-contract/guest-common" 2>/dev/null && pwd)}
 CXX=${CXX:-clang++}
 CC=${CC:-clang}
 mkdir -p "$OUT"
 FLAGS="-O2 -ffp-contract=off -Wall -Wextra -Werror=absolute-value -Wno-unused-parameter"
-INC="-I$ROOT/guest/headfit -I$ROOT/guest/drape -I$ROOT/guest/avbd/slang-rt -I$ROOT/vendor/sinew-align -I$HERE"
+INC="-I$ROOT/guest/headfit -I$GUEST_COMMON/guest -I$ROOT/guest/drape -I$ROOT/guest/avbd/slang-rt -I$ROOT/vendor/sinew-align -I$HERE"
 "$CC" -O2 -ffp-contract=off -I"$ROOT/vendor/sinew-align" -c "$ROOT/vendor/sinew-align/sinew_align.c" -o "$OUT/sinew_align.o"
-for f in guest/headfit/hf_core.cpp guest/headfit/hf_geom.cpp guest/headfit/hf_kernels.cpp \
+"$CXX" -std=c++17 $FLAGS $INC -c "$GUEST_COMMON/guest/common/hf_geom.cpp" -o "$OUT/hf_geom.cpp.o" &
+for f in guest/headfit/hf_core.cpp guest/headfit/hf_kernels.cpp \
          guest/drape/lbfgsb.cpp guest/drape/vec_cpu.cpp tests/headfit/hf_io.cpp tests/headfit/hf_native.cpp; do
   "$CXX" -std=c++17 $FLAGS $INC -c "$ROOT/$f" -o "$OUT/$(basename "$f").o" &
 done
