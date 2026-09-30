@@ -1,0 +1,18 @@
+# The head fit's kernels, by their Lean/Slang module names (lake exe
+# emit_headfit), all compiled for both targets: cpp (the in-guest CPU path
+# headfit.elf runs) and spirv (embedded for a GPU path). None shares group
+# memory; the two serial kernels (one thread) run the same sums in the same
+# order on both.
+# Forward, in dispatch order:
+hf_blend
+hf_similarity
+hf_surface_residual
+hf_landmark_residual
+hf_prior
+hf_energy_sum
+# Backward:
+hf_similarity_backward_prm
+hf_similarity_backward_v
+hf_blend_backward
+# The transfer:
+hf_resample
