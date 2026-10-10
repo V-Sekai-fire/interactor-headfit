@@ -17,4 +17,4 @@ tests/headfit/build.sh
 
 ## Licence
 
-No LICENSE file is present. The sources carry `Apache-2.0 OR MIT` SPDX headers.
+MIT. See [LICENSE](LICENSE).
