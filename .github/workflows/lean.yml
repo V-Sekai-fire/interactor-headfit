@@ -1,0 +1,33 @@
+name: lean
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: 3-interactor/headfit
+      - uses: actions/checkout@v4
+        with:
+          repository: V-Sekai-fire/contract-lbfgsb
+          path: 2-contract/lbfgsb
+      - uses: actions/checkout@v4
+        with:
+          repository: V-Sekai-fire/contract-anny-kernels
+          path: 2-contract/anny-kernels
+      - name: Lean
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - name: lake build (lean)
+        working-directory: 3-interactor/headfit/lean
+        run: |
+          lake build HeadFit emit_headfit
