@@ -1994,8 +1994,8 @@ void add_model(const Model &md, const float *src, const Term &t, std::vector<flo
 // convex hull (a notch in the outline does not pull the edge in). When the eye parts came from
 // geometry and the largest sits above the eyeball (a lash line, Mire), it slides down in one piece,
 // keeping its arc, and the lid skin above it follows it instead of rolling over it. k, above, below and margin were tuned leaving one avatar out: plain on
-// three-vrm-girl, AliciaSolid, a VRoid twist sample and a both-eyes-blink avatar; smile on
-// three-vrm-girl, the twist sample and Mire. The mesh frame is the fit's: Z up, -Y forward, the
+// three-vrm-girl, AliciaSolid, a VRoid twist sample, a VRoid twintail girl and a both-eyes-blink
+// avatar; smile on three-vrm-girl, the twist sample, the twintail girl, Mire and Marocchino. The mesh frame is the fit's: Z up, -Y forward, the
 // avatar's left on +X; mm, centred.
 
 struct CloseShape {
@@ -2004,13 +2004,18 @@ struct CloseShape {
 	double above; // lid skin and lashes above the eye follow over this many eye heights
 	double below; // smile: lower-lid skin below the eye rises over this many eye heights (0 = none)
 	double margin; // past the eye's corners, in eye widths
+	double lash_q; // the lash line lands with this share of its columns above the closing line
 };
-const CloseShape kPlainClose = { 0.3, true, 0.6, 0.0, 0.5 };
-const CloseShape kSmileClose = { 0.4, false, 0.6, 0.4, 0.25 };
+const CloseShape kPlainClose = { 0.4, true, 0.6, 0.0, 0.5, 0.3 };
+const CloseShape kSmileClose = { 0.5, false, 0.6, 0.2, 0.25, 0.15 };
 
-// The eye-role vertices split into connected parts when the host named no lash or iris: the largest
-// is the lid and eye white; a part wholly above it is a brow, any other an eyeball, iris or highlight
-// (Mire's eyeball never moves in her own closes; sliding it tore the eye).
+// The eye-role vertices split into connected parts when the host named no lash or iris. The widest
+// is the lash line (or the eye white); a part wholly above it is a brow; a part in front of the
+// eyeball (the largest of the rest) lying on the skin is a rim lash and moves with the lid skin; any
+// other is an eyeball, iris or highlight and stays still. Mire's and Marocchino's eyeballs never move
+// in their own closes; Marocchino's largest part is her eyeball, Mire's her lash line.
+const double kRimLash = 0.05; // a rim lash's median distance to the skin, in lash-line widths
+
 std::vector<uint8_t> eye_parts(const Mesh &ms) {
 	std::vector<uint8_t> role = ms.role;
 	const size_t N = role.size();
@@ -2049,16 +2054,44 @@ std::vector<uint8_t> eye_parts(const Mesh &ms) {
 		if (parts.empty()) {
 			continue;
 		}
+		// The lash line is the widest part (it spans the eye); the eyeball the largest of the rest.
+		const auto span = [&](const std::vector<uint32_t> &g) {
+			double lo = INFINITY, hi = -INFINITY;
+			for (uint32_t v : g) {
+				lo = std::min(lo, ms.m.v[v].x), hi = std::max(hi, ms.m.v[v].x);
+			}
+			return hi - lo;
+		};
+		const auto front = [&](const std::vector<uint32_t> &g) {
+			double f = -INFINITY;
+			for (uint32_t v : g) {
+				f = std::max(f, -ms.m.v[v].y);
+			}
+			return f;
+		};
 		uint32_t big = parts.begin()->first;
 		for (const std::pair<const uint32_t, std::vector<uint32_t>> &p : parts) {
-			if (p.second.size() > parts[big].size()) {
+			if (span(p.second) > span(parts[big])) {
 				big = p.first;
+			}
+		}
+		int64_t ball = -1;
+		for (const std::pair<const uint32_t, std::vector<uint32_t>> &p : parts) {
+			if (p.first != big && (ball < 0 || p.second.size() > parts[uint32_t(ball)].size())) {
+				ball = p.first;
 			}
 		}
 		double top = -INFINITY;
 		for (uint32_t v : parts[big]) {
 			top = std::max(top, ms.m.v[v].z);
 		}
+		std::vector<uint32_t> skin;
+		for (size_t i = 0; i < N; ++i) {
+			if (role[i] == ROLE_SKIN && (ms.m.v[i].x > 0.0 ? 1 : -1) == side) {
+				skin.push_back(uint32_t(i));
+			}
+		}
+		const double rim = kRimLash * span(parts[big]);
 		for (const std::pair<const uint32_t, std::vector<uint32_t>> &p : parts) {
 			if (p.first == big) {
 				continue;
@@ -2067,7 +2100,25 @@ std::vector<uint8_t> eye_parts(const Mesh &ms) {
 			for (uint32_t v : p.second) {
 				low = std::min(low, ms.m.v[v].z);
 			}
-			const uint8_t r = low > top ? ROLE_BROW : ROLE_IRIS;
+			uint8_t r = low > top ? ROLE_BROW : ROLE_IRIS;
+			if (r == ROLE_IRIS && int64_t(p.first) != ball && front(p.second) > front(parts[uint32_t(ball)]) && !skin.empty()) {
+				// A lash on the lid's rim: in front of the eyeball and on the skin; it moves with the lid.
+				std::vector<double> d;
+				for (uint32_t v : p.second) {
+					double m = INFINITY;
+					for (uint32_t k : skin) {
+						const double dx = ms.m.v[v].x - ms.m.v[k].x, dy = ms.m.v[v].y - ms.m.v[k].y, dz = ms.m.v[v].z - ms.m.v[k].z;
+						m = std::min(m, dx * dx + dy * dy + dz * dz);
+					}
+					d.push_back(std::sqrt(m));
+				}
+				std::sort(d.begin(), d.end());
+				const size_t n = d.size();
+				const double med = n % 2 ? d[n / 2] : 0.5 * (d[n / 2 - 1] + d[n / 2]);
+				if (med < rim) {
+					r = ROLE_SKIN;
+				}
+			}
 			for (uint32_t v : p.second) {
 				role[v] = r;
 			}
@@ -2123,8 +2174,6 @@ double quantile(std::vector<double> v, double q) {
 	const size_t i = size_t(at);
 	return i + 1 < v.size() ? v[i] + (at - double(i)) * (v[i + 1] - v[i]) : v[i];
 }
-
-const double kLashSlideQuantile = 0.3; // the lash line lands with 70% of its columns at or below the line
 
 // out (N*3 mm) += one eye's close (side +1 the avatar's left, -1 its right).
 bool anime_eye_close(const Mesh &ms, int side, const CloseShape &cs, std::vector<double> &out, std::string &why) {
@@ -2232,7 +2281,7 @@ bool anime_eye_close(const Mesh &ms, int side, const CloseShape &cs, std::vector
 			const double l = interp(gx[k], xs, lo), t = interp(gx[k], xs, hi);
 			gaps.push_back(closing(gx[k], l, t) - ll[k]);
 		}
-		const double shift = quantile(gaps, kLashSlideQuantile);
+		const double shift = quantile(gaps, cs.lash_q);
 		if (shift < 0.0) {
 			for (size_t v = 0; v < N; ++v) {
 				if (!on(v)) {
