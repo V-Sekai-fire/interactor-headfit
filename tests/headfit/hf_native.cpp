@@ -976,9 +976,7 @@ int mode_anime(Ctx &c) {
 	}
 	std::vector<float> left, right;
 	std::string why;
-	const std::string kind = arg("kind").empty() ? "plain" : arg("kind");
-	if (!hf::anime_shape(c.mesh, "anime_eye_close_" + kind + "_left", left, why) ||
-			!hf::anime_shape(c.mesh, "anime_eye_close_" + kind + "_right", right, why)) {
+	if (!hf::anime_shape(c.mesh, "anime_eye_close_plain_left", left, why) || !hf::anime_shape(c.mesh, "anime_eye_close_plain_right", right, why)) {
 		return die(why);
 	}
 	double e = 0, r = 0;
@@ -988,7 +986,7 @@ int mode_anime(Ctx &c) {
 	const double rel0 = anime_rel(c, zero, c.av.shapes[s], e0, r0);
 	const double rel1 = anime_rel(c, right, c.av.shapes[s], e1, r1);
 	const double budget = arg("budget_rel").empty() ? 1.0 : std::atof(arg("budget_rel").c_str());
-	std::printf("anime eye_close_%s_left vs %s: rel %.4f (%.2f of %.2f mm) %s\n", kind.c_str(), ref.c_str(), rel, e, r, rel < budget ? "PASS" : "FAIL");
+	std::printf("anime eye_close_plain_left vs %s: rel %.4f (%.2f of %.2f mm) %s\n", ref.c_str(), rel, e, r, rel < budget ? "PASS" : "FAIL");
 	std::printf("control zero shape: rel %.4f (must be 1)\n", rel0);
 	std::printf("control right eye vs the left reference: rel %.4f %s\n", rel1, rel1 > rel ? "FAIL (caught)" : "PASS (NOT caught)");
 	if (!arg("out").empty()) {
