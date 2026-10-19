@@ -52,6 +52,10 @@ enum Weight : int {
 	W_ROUNDS, // correspondence rounds
 	W_ITERS, // L-BFGS-B iterations per round
 	W_MAXDIST, // correspondence cut-off, mm
+	W_NR_ROUNDS, // non-rigid rounds between the fit and the transfer; 0 turns the step off
+	W_NR_STIFF, // the first round's membrane stiffness; it halves each round
+	W_NR_ITERS, // conjugate-gradient iterations per round
+	W_NR_REACH, // the first round's correspondence cut-off (mm); it falls to W_MAXDIST by the last
 	W_COUNT,
 };
 extern const float kWeightDefaults[W_COUNT];

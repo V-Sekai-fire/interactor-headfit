@@ -35,6 +35,10 @@ const float kWeightDefaults[W_COUNT] = {
 	6.0f, // W_ROUNDS
 	60.0f, // W_ITERS
 	8.0f, // W_MAXDIST (mm)
+	8.0f, // W_NR_ROUNDS
+	16.0f, // W_NR_STIFF
+	200.0f, // W_NR_ITERS
+	32.0f, // W_NR_REACH (mm)
 };
 
 const char *region_name(int r) {
@@ -1416,7 +1420,7 @@ struct Fit {
 	double f = 0.0;
 	// The final pose and the transfer's hits, made once, when a transfer asks.
 	Pipe rp;
-	enum HState { H_NONE, H_POSE, H_NORMALS, H_BVH, H_RAYS, H_READY } hst = H_NONE;
+	enum HState { H_NONE, H_POSE, H_NR_SETUP, H_NR_NORMALS, H_NR_CORR, H_NR_SOLVE, H_NORMALS, H_BVH, H_RAYS, H_READY } hst = H_NONE;
 	std::vector<float> fpos;
 	std::vector<hfg::V3> fmn;
 	hfg::Mesh pmesh; // the posed model (pbvh points into it)
@@ -1424,6 +1428,14 @@ struct Fit {
 	std::vector<uint32_t> hit;
 	std::vector<float> bary;
 	uint32_t matched = 0;
+	// The non-rigid step (W_NR_*): per-vertex offsets on the fitted pose (mm),
+	// a membrane over the model's edges, solved by Jacobi-preconditioned CG.
+	std::vector<double> nrd, nrw, nrb, nrr, nrz, nrp, nrap, nrdiag;
+	std::vector<uint32_t> nradj_off, nradj;
+	std::vector<hfg::V3> nrmn;
+	int nr_round = 0, nr_iter = 0;
+	uint32_t nr_valid = 0;
+	double nr_alpha = 0.0, nr_rz = 0.0;
 };
 
 void pipe_start(Pipe &p, const Model &md, const std::vector<float> &x, bool grad, uint32_t n, uint32_t K, uint32_t PS = 0) {
@@ -2090,6 +2102,206 @@ RegionStat region_stat(const Fit &F, const Posed &ps, int region) {
 	return s;
 }
 
+// ---- the non-rigid step: made once per fit, in items, before the hits ------------
+
+const double kNrMark = 10.0; // a mark's weight next to a surface vertex's 1
+const double kNrEps = 1e-3; // holds vertices no term reaches at their fitted place
+
+// y = A x, A = diag(nrdiag - alpha * degree) + alpha * L over the three axes.
+void nr_apply(const Fit &F, const std::vector<double> &x, std::vector<double> &y) {
+	const uint32_t P = uint32_t(F.nradj_off.size() - 1);
+	for (uint32_t i = 0; i < P; ++i) {
+		const uint32_t b = F.nradj_off[i], e = F.nradj_off[i + 1];
+		const double deg = double(e - b);
+		for (int r = 0; r < 3; ++r) {
+			double s = (F.nrw[i] + kNrEps + F.nr_alpha * deg) * x[i * 3 + r];
+			for (uint32_t k = b; k < e; ++k) {
+				s -= F.nr_alpha * x[F.nradj[k] * 3 + r];
+			}
+			y[i * 3 + r] = s;
+		}
+	}
+}
+
+double nr_dot(const std::vector<double> &a, const std::vector<double> &b) {
+	double s = 0.0;
+	for (size_t k = 0; k < a.size(); ++k) {
+		s += a[k] * b[k];
+	}
+	return s;
+}
+
+// This round's cut-off: W_NR_REACH in the first round down to W_MAXDIST in the last.
+double nr_reach(const Fit &F) {
+	const int R = std::max(1, int(F.W[W_NR_ROUNDS]));
+	const double t = R > 1 ? double(F.nr_round) / double(R - 1) : 1.0;
+	const double r0 = std::max(F.W[W_NR_REACH], F.W[W_MAXDIST]);
+	return r0 + (double(F.W[W_MAXDIST]) - r0) * t;
+}
+
+// One item of the non-rigid step; true when the offsets are final.
+bool nr_item(Fit &F, Gas &gas) {
+	const Model &md = *F.md;
+	const uint32_t P = md.P;
+	switch (F.hst) {
+		case Fit::H_NR_SETUP: {
+			std::vector<std::vector<uint32_t>> nb(P);
+			for (size_t t = 0; t + 2 < md.tri.size(); t += 3) {
+				for (int k = 0; k < 3; ++k) {
+					const uint32_t a = md.tri[t + size_t(k)], b = md.tri[t + size_t((k + 1) % 3)];
+					nb[a].push_back(b);
+					nb[b].push_back(a);
+				}
+			}
+			F.nradj_off.assign(size_t(P) + 1, 0u);
+			F.nradj.clear();
+			for (uint32_t i = 0; i < P; ++i) {
+				std::sort(nb[i].begin(), nb[i].end());
+				nb[i].erase(std::unique(nb[i].begin(), nb[i].end()), nb[i].end());
+				F.nradj.insert(F.nradj.end(), nb[i].begin(), nb[i].end());
+				F.nradj_off[i + 1] = uint32_t(F.nradj.size());
+			}
+			F.nrd.assign(size_t(P) * 3, 0.0);
+			F.nr_round = 0;
+			gas.spend(kilo(size_t(md.tri.size()) * 16));
+			F.hst = Fit::H_NR_NORMALS;
+			return false;
+		}
+		case Fit::H_NR_NORMALS: {
+			F.fpos.assign(size_t(P) * 3, 0.0f);
+			for (size_t k = 0; k < F.fpos.size(); ++k) {
+				F.fpos[k] = float(double(F.rp.pos[k]) + F.nrd[k]);
+			}
+			F.nrmn = model_normals(md, F.fpos);
+			F.nrw.assign(P, 0.0);
+			F.nrb.assign(size_t(P) * 3, 0.0);
+			F.nr_valid = 0;
+			F.cur = 0;
+			gas.spend(kilo(size_t(md.tri.size()) * 8));
+			F.hst = Fit::H_NR_CORR;
+			return false;
+		}
+		case Fit::H_NR_CORR: {
+			// 64 model vertices: each one's closest avatar point at the current
+			// offsets, with the fit's region weights; the marks pull too.
+			const float wr[R_COUNT] = { 0.0f, F.W[W_FACE], F.W[W_MOUTH], F.W[W_NOSE], F.W[W_EYES], F.W[W_CRANIUM], 0.0f };
+			const uint32_t end = std::min(P, F.cur + 64);
+			for (uint32_t i = F.cur; i < end; ++i) {
+				const Corr c = correspond(F, F.fpos, i, F.nrmn, nr_reach(F));
+				if (!c.ok || wr[md.label[i]] <= 0.0f) {
+					continue;
+				}
+				const double w = double(wr[md.label[i]]);
+				const double q[3] = { c.c.q.x, c.c.q.y, c.c.q.z };
+				F.nrw[i] += w;
+				for (int r = 0; r < 3; ++r) {
+					F.nrb[i * 3 + r] += w * (q[r] - double(F.rp.pos[i * 3 + r]));
+				}
+				++F.nr_valid;
+			}
+			gas.spend(kilo(size_t(end - F.cur) * 512));
+			F.cur = end;
+			if (F.cur < P) {
+				return false;
+			}
+			for (uint32_t k = 0; k < F.K; ++k) {
+				const uint32_t i = F.mid[k];
+				F.nrw[i] += kNrMark;
+				for (int r = 0; r < 3; ++r) {
+					F.nrb[i * 3 + r] += kNrMark * (double(F.tgtK[k * 3 + r]) - double(F.rp.pos[i * 3 + r]));
+				}
+			}
+			F.nr_alpha = double(F.W[W_NR_STIFF]) / std::pow(2.0, double(F.nr_round));
+			F.nrdiag.assign(P, 0.0);
+			for (uint32_t i = 0; i < P; ++i) {
+				F.nrdiag[i] = F.nrw[i] + kNrEps + F.nr_alpha * double(F.nradj_off[i + 1] - F.nradj_off[i]);
+			}
+			// CG from the previous round's offsets.
+			F.nrap.assign(size_t(P) * 3, 0.0);
+			nr_apply(F, F.nrd, F.nrap);
+			F.nrr.assign(size_t(P) * 3, 0.0);
+			F.nrz.assign(size_t(P) * 3, 0.0);
+			for (size_t k = 0; k < F.nrr.size(); ++k) {
+				F.nrr[k] = F.nrb[k] - F.nrap[k];
+				F.nrz[k] = F.nrr[k] / F.nrdiag[k / 3];
+			}
+			F.nrp = F.nrz;
+			F.nr_rz = nr_dot(F.nrr, F.nrz);
+			F.nr_iter = 0;
+			F.hst = Fit::H_NR_SOLVE;
+			return false;
+		}
+		case Fit::H_NR_SOLVE: {
+			// Ten CG iterations an item.
+			const int iters = std::max(1, int(F.W[W_NR_ITERS]));
+			for (int s = 0; s < 10 && F.nr_iter < iters && F.nr_rz > 0.0; ++s, ++F.nr_iter) {
+				nr_apply(F, F.nrp, F.nrap);
+				const double pap = nr_dot(F.nrp, F.nrap);
+				if (pap <= 0.0) {
+					break;
+				}
+				const double a = F.nr_rz / pap;
+				for (size_t k = 0; k < F.nrd.size(); ++k) {
+					F.nrd[k] += a * F.nrp[k];
+					F.nrr[k] -= a * F.nrap[k];
+					F.nrz[k] = F.nrr[k] / F.nrdiag[k / 3];
+				}
+				const double rz = nr_dot(F.nrr, F.nrz);
+				const double beta = rz / F.nr_rz;
+				F.nr_rz = rz;
+				for (size_t k = 0; k < F.nrp.size(); ++k) {
+					F.nrp[k] = F.nrz[k] + beta * F.nrp[k];
+				}
+			}
+			gas.spend(kilo(size_t(P) * 3 * 64));
+			if (F.nr_iter < iters && F.nr_rz > 0.0) {
+				return false;
+			}
+			if (++F.nr_round < int(F.W[W_NR_ROUNDS])) {
+				F.hst = Fit::H_NR_NORMALS;
+				return false;
+			}
+			return true;
+		}
+		default:
+			return true;
+	}
+}
+
+// The non-rigid offsets' size (mm), for the reports.
+std::string nr_info(const Fit &F) {
+	if (F.nrd.empty()) {
+		return "nr_rounds 0";
+	}
+	double ss = 0.0, mx = 0.0;
+	const uint32_t P = uint32_t(F.nrd.size() / 3);
+	for (uint32_t i = 0; i < P; ++i) {
+		const double m2 = F.nrd[i * 3] * F.nrd[i * 3] + F.nrd[i * 3 + 1] * F.nrd[i * 3 + 1] + F.nrd[i * 3 + 2] * F.nrd[i * 3 + 2];
+		ss += m2;
+		mx = std::max(mx, std::sqrt(m2));
+	}
+	std::string out = fmt("nr_rounds %d nr_valid %u nr_rms_mm %.4f nr_max_mm %.4f", F.nr_round, F.nr_valid, std::sqrt(ss / P), mx);
+	if (!F.fmn.empty()) {
+		uint32_t ok[R_COUNT] = { 0 }, all[R_COUNT] = { 0 }, far[R_COUNT] = { 0 }, face[R_COUNT] = { 0 };
+		for (uint32_t i = 0; i < P; ++i) {
+			const uint8_t l = F.md->label[i];
+			++all[l];
+			const Corr c = correspond(F, F.fpos, i, F.fmn, F.W[W_MAXDIST]);
+			if (c.ok) {
+				++ok[l];
+			} else if (c.c.tri >= 0 && std::sqrt(c.c.d2) > F.W[W_MAXDIST]) {
+				++far[l];
+			} else {
+				++face[l];
+			}
+		}
+		for (int r = 0; r < R_COUNT; ++r) {
+			out += fmt(" reach_%s %u/%u far %u other %u", region_name(r), ok[r], all[r], far[r], face[r]);
+		}
+	}
+	return out;
+}
+
 // ---- the transfer's hits: made once per fit, in items ----------------------------
 
 // One item; true when the hits are ready. Only on a finished fit.
@@ -2103,11 +2315,22 @@ bool hits_item(Fit &F, Gas &gas) {
 			return false;
 		case Fit::H_POSE:
 			if (pipe_item(F.rp, F, gas)) {
+				F.hst = int(F.W[W_NR_ROUNDS]) > 0 ? Fit::H_NR_SETUP : Fit::H_NORMALS;
+			}
+			return false;
+		case Fit::H_NR_SETUP:
+		case Fit::H_NR_NORMALS:
+		case Fit::H_NR_CORR:
+		case Fit::H_NR_SOLVE:
+			if (nr_item(F, gas)) {
 				F.hst = Fit::H_NORMALS;
 			}
 			return false;
 		case Fit::H_NORMALS:
 			F.fpos = F.rp.pos;
+			for (size_t k = 0; k < F.nrd.size(); ++k) {
+				F.fpos[k] = float(double(F.rp.pos[k]) + F.nrd[k]);
+			}
 			F.fmn = model_normals(md, F.fpos);
 			F.pmesh.v.resize(md.P);
 			for (uint32_t i = 0; i < md.P; ++i) {
@@ -2179,6 +2402,7 @@ struct Xfer {
 	uint32_t support = 0, moved = 0, reached = 0, art_moved = 0;
 	double ess = 0, mss = 0;
 	double ess_r = 0, mss_r = 0; // over the reached vertices only
+	double ess_lab[R_COUNT][2] = {}; // the error by region, unreached [0] and reached [1]
 	double R[9];
 	std::string form = "action", info, err;
 	float error_mm = 0.0f;
@@ -2302,6 +2526,7 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 				}
 				for (int r = 0; r < 3; ++r) {
 					X.ess += (back[r] - sd[r]) * (back[r] - sd[r]);
+					X.ess_lab[md.label[i]][c.ok ? 1 : 0] += (back[r] - sd[r]) * (back[r] - sd[r]);
 				}
 				if (c.ok) {
 					for (int r = 0; r < 3; ++r) {
@@ -2339,6 +2564,12 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 					X.reached, X.support - X.reached, X.moved, X.art_moved, hits ? F.matched : 0u,
 					hits ? N - F.matched : 0u, mag, double(X.error_mm), mag > 0 ? double(X.error_mm) / mag : 0.0, X.reached ? std::sqrt(X.ess_r / X.reached) : 0.0,
 					X.mss_r > 0 ? std::sqrt(X.ess_r / X.mss_r) : 0.0);
+			X.info += " " + nr_info(F);
+			for (int r = 0; r < R_COUNT; ++r) {
+				if (X.ess > 0.0 && X.ess_lab[r][0] + X.ess_lab[r][1] > 0.0) {
+					X.info += fmt(" err_%s_unreached %.3f err_%s_reached %.3f", region_name(r), X.ess_lab[r][0] / X.ess, region_name(r), X.ess_lab[r][1] / X.ess);
+				}
+			}
 			X.deltas.resize(X.out.size());
 			for (size_t k = 0; k < X.out.size(); ++k) {
 				X.deltas[k] = float((double(X.out[k]) + X.fd.art[k]) / kMToMm);
