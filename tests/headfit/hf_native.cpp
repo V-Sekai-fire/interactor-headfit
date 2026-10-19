@@ -720,6 +720,9 @@ std::vector<std::string> map_names(const std::string &path) {
 		while (!n.empty() && (n[0] == ' ' || n[0] == '\t')) {
 			n.erase(0, 1);
 		}
+		if (n.rfind("@anime", 0) == 0) {
+			continue; // a style's replacement of a name listed above
+		}
 		out.push_back(n);
 	}
 	return out;
