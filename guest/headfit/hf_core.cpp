@@ -437,6 +437,7 @@ struct Mesh {
 	double origin[3] = { 0, 0, 0 };
 	std::vector<std::string> shape_names;
 	std::vector<std::vector<float>> shapes; // the avatar's own shapes (hf_mesh_add_shape), dense, metres
+	std::vector<uint8_t> role; // per vertex, ROLE_* (hf_mesh_set_roles); empty when the host gave none
 };
 
 struct Marks {
@@ -1056,6 +1057,8 @@ std::string unit_key(const char *race, const std::string &name) {
 }
 
 const char *const kProcedural[7] ={ "out_step1", "out_step2", "roll", "twist_left", "twist_right", "flat", "squish" };
+// The anime style's own kinds, computed on the avatar mesh from its roles (hf_mesh_set_roles).
+const char *const kAnimeKinds[2] = { "anime_eye_close_plain_left", "anime_eye_close_plain_right" };
 
 struct Term {
 	enum K { ACTION, ENTRY, UNIT, ARTIST, PROCEDURAL, CORRECTIVE, BONE, BAKED, MATERIAL, ABSENT } k = ACTION;
@@ -1315,6 +1318,9 @@ void resolve_map(std::vector<Entry> &map, std::string &unknown, uint32_t &nunkno
 			} else if (t.k == Term::PROCEDURAL) {
 				bool known = false;
 				for (const char *p : kProcedural) {
+					known = known || t.ref == p;
+				}
+				for (const char *p : kAnimeKinds) {
 					known = known || t.ref == p;
 				}
 				if (!known) {
@@ -1977,6 +1983,166 @@ void add_model(const Model &md, const float *src, const Term &t, std::vector<flo
 
 // Add a sum of terms into f. False with the reason for a term dress-on does
 // not compute (procedural, corrective, bone, baked, absent) or cannot find.
+// ---- the anime style's plain eye close ------------------------------------------
+//
+// The upper lid group comes down onto a closing line just above the eye's lower edge; the lower
+// half, the iris and the brow stay still (references: three-vrm-girl Fcl_EYE_Close_L, AliciaSolid
+// blink_l; k, above and margin were tuned leaving one avatar out). The mesh frame is the fit's:
+// Z up, -Y forward, the avatar's left on +X; mm, centred.
+
+const double kCloseK = 0.3; // the closing line, as a share of the eye's height above its lower edge
+const double kCloseAbove = 0.6; // lid skin and lashes above the eye follow over this many eye heights
+const double kCloseMargin = 0.5; // past the eye's corners, in eye widths
+
+// The eye-role vertices split into connected parts when the host named no lash or iris: a part
+// wholly above the largest is a brow, one under 15% of its size a highlight; both stay still.
+std::vector<uint8_t> eye_parts(const Mesh &ms) {
+	std::vector<uint8_t> role = ms.role;
+	const size_t N = role.size();
+	bool named = false;
+	for (uint8_t r : role) {
+		named = named || r == ROLE_LASH || r == ROLE_IRIS;
+	}
+	if (named) {
+		return role;
+	}
+	std::vector<uint32_t> par(N);
+	for (size_t i = 0; i < N; ++i) {
+		par[i] = uint32_t(i);
+	}
+	std::function<uint32_t(uint32_t)> find = [&](uint32_t a) -> uint32_t {
+		while (par[a] != a) {
+			par[a] = par[par[a]];
+			a = par[a];
+		}
+		return a;
+	};
+	for (size_t t = 0; t + 2 < ms.m.t.size(); t += 3) {
+		const uint32_t a = ms.m.t[t], b = ms.m.t[t + 1], c = ms.m.t[t + 2];
+		if (role[a] == ROLE_EYE && role[b] == ROLE_EYE && role[c] == ROLE_EYE) {
+			par[find(a)] = find(b);
+			par[find(c)] = find(b);
+		}
+	}
+	for (int side = -1; side <= 1; side += 2) {
+		std::map<uint32_t, std::vector<uint32_t>> parts;
+		for (size_t i = 0; i < N; ++i) {
+			if (role[i] == ROLE_EYE && (ms.m.v[i].x > 0.0 ? 1 : -1) == side) {
+				parts[find(uint32_t(i))].push_back(uint32_t(i));
+			}
+		}
+		if (parts.empty()) {
+			continue;
+		}
+		uint32_t big = parts.begin()->first;
+		for (const std::pair<const uint32_t, std::vector<uint32_t>> &p : parts) {
+			if (p.second.size() > parts[big].size()) {
+				big = p.first;
+			}
+		}
+		double top = -INFINITY;
+		for (uint32_t v : parts[big]) {
+			top = std::max(top, ms.m.v[v].z);
+		}
+		for (const std::pair<const uint32_t, std::vector<uint32_t>> &p : parts) {
+			if (p.first == big) {
+				continue;
+			}
+			double low = INFINITY;
+			for (uint32_t v : p.second) {
+				low = std::min(low, ms.m.v[v].z);
+			}
+			const uint8_t r = low > top ? ROLE_BROW : (double(p.second.size()) < 0.15 * double(parts[big].size()) ? ROLE_IRIS : ROLE_EYE);
+			for (uint32_t v : p.second) {
+				role[v] = r;
+			}
+		}
+	}
+	return role;
+}
+
+double interp(double x, const std::vector<double> &xs, const std::vector<double> &ys) {
+	if (x <= xs.front()) {
+		return ys.front();
+	}
+	if (x >= xs.back()) {
+		return ys.back();
+	}
+	size_t k = 1;
+	while (xs[k] < x) {
+		++k;
+	}
+	const double t = (x - xs[k - 1]) / (xs[k] - xs[k - 1]);
+	return ys[k - 1] + t * (ys[k] - ys[k - 1]);
+}
+
+// out (N*3 mm) += the plain close of one eye (side +1 the avatar's left, -1 its right).
+bool anime_eye_close(const Mesh &ms, int side, std::vector<double> &out, std::string &why) {
+	if (ms.role.size() != ms.m.v.size()) {
+		why = "the anime eye close needs the vertex roles (hf_mesh_set_roles)";
+		return false;
+	}
+	const std::vector<uint8_t> role = eye_parts(ms);
+	const size_t N = ms.m.v.size();
+	std::vector<uint32_t> eye;
+	double x0 = INFINITY, x1 = -INFINITY, fmin = INFINITY;
+	for (size_t i = 0; i < N; ++i) {
+		if (role[i] == ROLE_EYE && (ms.m.v[i].x > 0.0 ? 1 : -1) == side) {
+			eye.push_back(uint32_t(i));
+			x0 = std::min(x0, ms.m.v[i].x);
+			x1 = std::max(x1, ms.m.v[i].x);
+			fmin = std::min(fmin, -ms.m.v[i].y);
+		}
+	}
+	if (eye.size() < 3 || x1 <= x0) {
+		why = fmt("no eye vertices on the %s side", side > 0 ? "left" : "right");
+		return false;
+	}
+	// The outline's lower and upper edge in ten bins across the eye.
+	std::vector<double> xs, lo, hi;
+	for (int b = 0; b < 10; ++b) {
+		const double a = x0 + (x1 - x0) * b / 10.0, e = x0 + (x1 - x0) * (b + 1) / 10.0;
+		double sx = 0.0, l = INFINITY, h = -INFINITY;
+		int n = 0;
+		for (uint32_t v : eye) {
+			const hfg::V3 &p = ms.m.v[v];
+			if (p.x >= a && p.x <= e) {
+				sx += p.x, l = std::min(l, p.z), h = std::max(h, p.z), ++n;
+			}
+		}
+		if (n) {
+			xs.push_back(sx / n), lo.push_back(l), hi.push_back(h);
+		}
+	}
+	double H = 0.0;
+	for (size_t k = 0; k < xs.size(); ++k) {
+		H = std::max(H, hi[k] - lo[k]);
+	}
+	const double W = x1 - x0, front = fmin - 0.25 * H;
+	for (size_t v = 0; v < N; ++v) {
+		const hfg::V3 &p = ms.m.v[v];
+		if ((p.x > 0.0 ? 1 : -1) != side || role[v] == ROLE_IRIS || role[v] == ROLE_BROW || -p.y < front) {
+			continue;
+		}
+		const double ox = std::max({ 0.0, x0 - p.x, p.x - x1 }) / W;
+		if (ox > kCloseMargin) {
+			continue;
+		}
+		const double wx = ox <= 0.0 ? 1.0 : (1.0 - ox / kCloseMargin) * (1.0 - ox / kCloseMargin);
+		const double l = interp(p.x, xs, lo), t = interp(p.x, xs, hi);
+		const double cl = l + kCloseK * (t - l);
+		double dh = 0.0;
+		if (p.z >= cl && p.z <= t) {
+			dh = -(p.z - cl);
+		} else if (p.z > t && p.z <= t + kCloseAbove * H) {
+			const double f = 1.0 - (p.z - t) / (kCloseAbove * H);
+			dh = -(t - cl) * f * f;
+		}
+		out[v * 3 + 2] += dh * wx;
+	}
+	return true;
+}
+
 bool term_fields(Fit &F, const std::vector<Entry> &map, const std::map<std::string, size_t> &by,
 		const std::vector<Term> &terms, Fields &f, std::string &why, int depth) {
 	const Model &md = *F.md;
@@ -2051,6 +2217,13 @@ bool term_fields(Fit &F, const std::vector<Entry> &map, const std::map<std::stri
 				break;
 			}
 			case Term::PROCEDURAL:
+				if (t.ref == kAnimeKinds[0] || t.ref == kAnimeKinds[1]) {
+					if (!anime_eye_close(*F.ms, t.ref == kAnimeKinds[0] ? 1 : -1, f.art, why)) {
+						return false;
+					}
+					++f.artists;
+					break;
+				}
 				why = "procedural:" + t.ref + " is the next stage (RFD 2275's tongue frame), not computed here";
 				return false;
 			case Term::CORRECTIVE:
@@ -2732,6 +2905,48 @@ int mesh_create(const float *xyz, int nv, const int32_t *tri, int nt) {
 	}
 	g_err.clear();
 	return put(K_MESH, m);
+}
+
+bool anime_shape(int mesh, const std::string &kind, std::vector<float> &deltas, std::string &why) {
+	const Mesh *m = get<Mesh>(mesh, K_MESH, "mesh");
+	if (!m) {
+		why = g_err;
+		return false;
+	}
+	if (kind != kAnimeKinds[0] && kind != kAnimeKinds[1]) {
+		why = kind + " is not an anime kind";
+		return false;
+	}
+	std::vector<double> out(m->m.v.size() * 3, 0.0);
+	if (!anime_eye_close(*m, kind == kAnimeKinds[0] ? 1 : -1, out, why)) {
+		return false;
+	}
+	deltas.resize(out.size());
+	for (size_t k = 0; k < out.size(); ++k) {
+		deltas[k] = float(out[k] / kMToMm);
+	}
+	return true;
+}
+
+int mesh_set_roles(int mesh, const int32_t *roles, int n) {
+	Mesh *m = get<Mesh>(mesh, K_MESH, "mesh");
+	if (!m) {
+		return -1;
+	}
+	if (size_t(n) != m->m.v.size()) {
+		fail("hf_mesh_set_roles: %d roles for %zu vertices", n, m->m.v.size());
+		return -1;
+	}
+	m->role.assign(size_t(n), uint8_t(ROLE_SKIN));
+	for (int i = 0; i < n; ++i) {
+		if (roles[i] < ROLE_SKIN || roles[i] > ROLE_BROW) {
+			fail("hf_mesh_set_roles: vertex %d has role %d (0 skin, 1 eye, 2 lash, 3 iris, 4 brow)", i, roles[i]);
+			return -1;
+		}
+		m->role[size_t(i)] = uint8_t(roles[i]);
+	}
+	g_err.clear();
+	return n;
 }
 
 int mesh_add_shape(int mesh, const std::string &name, const float *deltas, int n3) {

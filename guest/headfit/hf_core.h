@@ -78,6 +78,11 @@ std::string data_report();
 
 int mesh_create(const float *xyz, int nv, const int32_t *tri, int nt);
 int mesh_add_shape(int mesh, const std::string &name, const float *deltas, int n3);
+// A role per vertex for the anime style's procedural shapes; returns n, or -1.
+enum Role : int32_t { ROLE_SKIN = 0, ROLE_EYE = 1, ROLE_LASH = 2, ROLE_IRIS = 3, ROLE_BROW = 4 };
+int mesh_set_roles(int mesh, const int32_t *roles, int n);
+// One anime procedural kind on the mesh alone (no fit): dense deltas, metres.
+bool anime_shape(int mesh, const std::string &kind, std::vector<float> &deltas, std::string &why);
 // A model job: parses the queued uploads, then builds (tick it until DONE).
 int model_load(int region);
 int marks_create(const int32_t *model_ids, const int32_t *avatar_ids, int n);

@@ -51,6 +51,10 @@ static Variant hf_mesh_add_shape(int mesh, String name, PackedArray<float> delta
 	return Variant(int64_t(hf::mesh_add_shape(mesh, name.utf8(), d.data(), int(d.size()))));
 }
 
+static Variant hf_mesh_set_roles(int mesh, PackedArray<int32_t> roles) {
+	const std::vector<int32_t> r = roles.fetch();
+	return Variant(int64_t(hf::mesh_set_roles(mesh, r.data(), int(r.size()))));
+}
 static Variant hf_model_load(int region) {
 	return Variant(int64_t(hf::model_load(region)));
 }
@@ -138,6 +142,8 @@ int main() {
 			"The avatar mesh (metres); a handle");
 	ADD_API_FUNCTION(hf_mesh_add_shape, "int", "int mesh, String name, PackedFloat32Array deltas",
 			"One of the avatar's own shapes (dense deltas, metres), for artist: sources");
+	ADD_API_FUNCTION(hf_mesh_set_roles, "int", "int mesh, PackedInt32Array roles",
+			"A role per vertex (0 skin, 1 eye, 2 lash, 3 iris, 4 brow) for the anime style's eye close");
 	ADD_API_FUNCTION(hf_model_load, "int", "int region", "A model job over ANNY's head (0) or face (1); tick it");
 	ADD_API_FUNCTION(hf_marks_create, "int", "PackedInt32Array model_ids, PackedInt32Array avatar_ids",
 			"Landmark pairs: base.obj vertex (0-based) and avatar vertex");

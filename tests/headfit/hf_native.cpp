@@ -5,7 +5,7 @@
 //
 //   hf_native <mode> [key=value ...]
 //
-// modes: load, probe, marks, fit, transfer, identity, audit, coeffs, dump.
+// modes: load, probe, marks, fit, transfer, identity, audit, coeffs, dump, anime.
 // keys:  anny=<ANNY data dir> dials=<local_dials.txt> map=<unified_expressions.map>
 //        fixture=<dir with avatar_body.usda, avatar_shapes.txt>
 //        marks=<file> out=<file or dir> required=<names file> cases=<phenotype list>
@@ -115,6 +115,25 @@ bool load_avatar(Ctx &c, bool with_shapes) {
 	if (c.mesh < 0) {
 		std::printf("FAIL mesh_create: %s\n", hf::last_error().c_str());
 		return false;
+	}
+	std::string rtext;
+	if (hfio::read_file(fx + "/avatar_roles.txt", rtext)) {
+		std::vector<int32_t> roles;
+		size_t p = 0;
+		while (p < rtext.size()) {
+			size_t e = rtext.find('\n', p);
+			if (e == std::string::npos) {
+				e = rtext.size();
+			}
+			if (e > p) {
+				roles.push_back(int32_t(std::atoi(rtext.substr(p, e - p).c_str())));
+			}
+			p = e + 1;
+		}
+		if (hf::mesh_set_roles(c.mesh, roles.data(), int(roles.size())) < 0) {
+			std::printf("FAIL mesh_set_roles: %s\n", hf::last_error().c_str());
+			return false;
+		}
 	}
 	if (with_shapes) {
 		for (size_t s = 0; s < c.av.shapes.size(); ++s) {
@@ -915,6 +934,74 @@ int mode_coeffs(Ctx &c) {
 
 // ---- load: counts and checksums -------------------------------------------------
 
+// ---- anime: the anime style's procedural eye close on the avatar alone ----------
+//
+// rel = rms(generated - ref) / rms(ref) over the left half's vertices either moves; a zero shape
+// scores 1. Controls: the right eye's close against the left reference must score worse.
+double anime_rel(const Ctx &c, const std::vector<float> &g, const std::vector<float> &r, double &e_mm, double &r_mm) {
+	double ee = 0.0, rr = 0.0;
+	int n = 0;
+	for (size_t i = 0; i * 3 < g.size(); ++i) {
+		if (c.av.xyz[i * 3] <= 0.0f) {
+			continue;
+		}
+		const float *a = &g[i * 3], *b = &r[i * 3];
+		if (a[0] == 0.0f && a[1] == 0.0f && a[2] == 0.0f && b[0] == 0.0f && b[1] == 0.0f && b[2] == 0.0f) {
+			continue;
+		}
+		for (int k = 0; k < 3; ++k) {
+			ee += double(a[k] - b[k]) * double(a[k] - b[k]);
+			rr += double(b[k]) * double(b[k]);
+		}
+		++n;
+	}
+	e_mm = n ? std::sqrt(ee / n) * 1e3 : 0.0;
+	r_mm = n ? std::sqrt(rr / n) * 1e3 : 0.0;
+	return rr > 0.0 ? std::sqrt(ee / rr) : 0.0;
+}
+
+int mode_anime(Ctx &c) {
+	if (!load_avatar(c, false)) {
+		return 2;
+	}
+	const std::string ref = arg("ref");
+	size_t s = c.av.shape_names.size();
+	for (size_t k = 0; k < c.av.shape_names.size(); ++k) {
+		if (c.av.shape_names[k] == ref) {
+			s = k;
+		}
+	}
+	if (s == c.av.shape_names.size()) {
+		return die("ref=" + ref + " is not a fixture shape");
+	}
+	std::vector<float> left, right;
+	std::string why;
+	if (!hf::anime_shape(c.mesh, "anime_eye_close_plain_left", left, why) || !hf::anime_shape(c.mesh, "anime_eye_close_plain_right", right, why)) {
+		return die(why);
+	}
+	double e = 0, r = 0;
+	const double rel = anime_rel(c, left, c.av.shapes[s], e, r);
+	const std::vector<float> zero(left.size(), 0.0f);
+	double e0 = 0, r0 = 0, e1 = 0, r1 = 0;
+	const double rel0 = anime_rel(c, zero, c.av.shapes[s], e0, r0);
+	const double rel1 = anime_rel(c, right, c.av.shapes[s], e1, r1);
+	const double budget = arg("budget_rel").empty() ? 1.0 : std::atof(arg("budget_rel").c_str());
+	std::printf("anime eye_close_plain_left vs %s: rel %.4f (%.2f of %.2f mm) %s\n", ref.c_str(), rel, e, r, rel < budget ? "PASS" : "FAIL");
+	std::printf("control zero shape: rel %.4f (must be 1)\n", rel0);
+	std::printf("control right eye vs the left reference: rel %.4f %s\n", rel1, rel1 > rel ? "FAIL (caught)" : "PASS (NOT caught)");
+	if (!arg("out").empty()) {
+		FILE *f = std::fopen(arg("out").c_str(), "w");
+		if (!f) {
+			return die("cannot write " + arg("out"));
+		}
+		for (size_t i = 0; i * 3 < left.size(); ++i) {
+			std::fprintf(f, "%.9g %.9g %.9g\n", left[i * 3], left[i * 3 + 1], left[i * 3 + 2]);
+		}
+		std::fclose(f);
+	}
+	return rel < budget && rel1 > rel ? 0 : 1;
+}
+
 int mode_load(Ctx &c) {
 	if (!upload(c) || !load_model(c)) {
 		return 2;
@@ -973,6 +1060,9 @@ int main(int argc, char **argv) {
 	}
 	if (mode == "probe") {
 		return mode_probe(c);
+	}
+	if (mode == "anime") {
+		return mode_anime(c);
 	}
 	return die("unknown mode " + mode);
 }
