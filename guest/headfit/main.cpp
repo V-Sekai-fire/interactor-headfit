@@ -153,7 +153,7 @@ int main() {
 	ADD_API_FUNCTION(hf_mesh_set_roles, "int", "int mesh, PackedInt32Array roles",
 			"A role per vertex (0 skin, 1 eye, 2 lash, 3 iris, 4 brow) for the anime style's eye close");
 	ADD_API_FUNCTION(hf_anime_shape, "PackedFloat32Array", "int mesh, String kind",
-			"An anime procedural shape (anime_eye_close_plain|smile_left|right) on the mesh alone, metres; empty + hf_error on failure");
+			"An anime procedural shape (anime_eye_close_plain_left|right) on the mesh alone, metres; empty + hf_error on failure");
 	ADD_API_FUNCTION(hf_model_load, "int", "int region", "A model job over ANNY's head (0) or face (1); tick it");
 	ADD_API_FUNCTION(hf_marks_create, "int", "PackedInt32Array model_ids, PackedInt32Array avatar_ids",
 			"Landmark pairs: base.obj vertex (0-based) and avatar vertex");
