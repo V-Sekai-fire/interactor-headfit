@@ -2907,6 +2907,8 @@ int mesh_create(const float *xyz, int nv, const int32_t *tri, int nt) {
 	return put(K_MESH, m);
 }
 
+constexpr bool kAnimeClosesShip = false;
+
 bool anime_shape(int mesh, const std::string &kind, std::vector<float> &deltas, std::string &why) {
 	const Mesh *m = get<Mesh>(mesh, K_MESH, "mesh");
 	if (!m) {
@@ -2915,6 +2917,13 @@ bool anime_shape(int mesh, const std::string &kind, std::vector<float> &deltas, 
 	}
 	if (kind != kAnimeKinds[0] && kind != kAnimeKinds[1]) {
 		why = g_err = kind + " is not an anime kind";
+		return false;
+	}
+	// Held back: rendered with their textures and alpha cutout, the closes score well against the
+	// avatars' own but do not look like them (a curled lash line, the iris highlight showing, the
+	// eye left half open on AliciaSolid). No avatar gets one until a close passes that check.
+	if (!kAnimeClosesShip) {
+		why = g_err = "the anime eye closes are held back until they pass the picture check";
 		return false;
 	}
 	std::vector<double> out(m->m.v.size() * 3, 0.0);
