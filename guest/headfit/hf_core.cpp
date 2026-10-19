@@ -1108,7 +1108,20 @@ bool has_prefix(const std::string &s, const char *p, std::string &rest) {
 
 // Parse the map's syntax; names are resolved by resolve_map. Syntax errors go
 // to errs with their line; false only when the map was never uploaded.
-bool parse_map(std::vector<Entry> &out, std::string &errs) {
+// An anime line replaces the line of the same name; anime lines come last in the map.
+void put_entry(std::vector<Entry> &out, const Entry &e, bool anime_line) {
+	if (anime_line) {
+		for (Entry &o : out) {
+			if (o.name == e.name) {
+				o = e;
+				return;
+			}
+		}
+	}
+	out.push_back(e);
+}
+
+bool parse_map(std::vector<Entry> &out, std::string &errs, bool anime = false) {
 	auto it = raw().find("unified_expressions.map");
 	if (it == raw().end()) {
 		return fail("missing unified_expressions.map (upload it with hf_data_put)");
@@ -1127,6 +1140,15 @@ bool parse_map(std::vector<Entry> &out, std::string &errs) {
 			continue;
 		}
 		std::string rest;
+		// `@anime Name <= ...` replaces Name's line in the anime style only.
+		bool anime_line = false;
+		if (has_prefix(line, "@anime", rest)) {
+			if (!anime) {
+				continue;
+			}
+			line = trim(rest);
+			anime_line = true;
+		}
 		if (has_prefix(line, "@stage", rest)) {
 			char *q = nullptr;
 			const long s = std::strtol(rest.c_str(), &q, 10);
@@ -1161,7 +1183,7 @@ bool parse_map(std::vector<Entry> &out, std::string &errs) {
 			}
 			e.terms.push_back(t);
 			e.form = "absent";
-			out.push_back(e);
+			put_entry(out, e, anime_line);
 			continue;
 		}
 		bool ok = true;
@@ -1257,7 +1279,7 @@ bool parse_map(std::vector<Entry> &out, std::string &errs) {
 		} else {
 			e.form = !t0.masks.empty() ? "mask" : (t0.scale != 1.0 ? "scaled" : "direct");
 		}
-		out.push_back(e);
+		put_entry(out, e, anime_line);
 	}
 	return true;
 }
@@ -2434,7 +2456,7 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 				} else {
 					std::string errs, unknown;
 					uint32_t nunknown = 0;
-					if (!parse_map(map, errs)) {
+					if (!parse_map(map, errs, F.W[W_STYLE] >= 1.0f)) {
 						return xfer_fail(X, g_err);
 					}
 					resolve_map(map, unknown, nunknown);
