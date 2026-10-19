@@ -1058,7 +1058,8 @@ std::string unit_key(const char *race, const std::string &name) {
 
 const char *const kProcedural[7] ={ "out_step1", "out_step2", "roll", "twist_left", "twist_right", "flat", "squish" };
 // The anime style's own kinds, computed on the avatar mesh from its roles (hf_mesh_set_roles).
-const char *const kAnimeKinds[2] = { "anime_eye_close_plain_left", "anime_eye_close_plain_right" };
+const char *const kAnimeKinds[4] = { "anime_eye_close_plain_left", "anime_eye_close_plain_right",
+	"anime_eye_close_smile_left", "anime_eye_close_smile_right" };
 
 struct Term {
 	enum K { ACTION, ENTRY, UNIT, ARTIST, PROCEDURAL, CORRECTIVE, BONE, BAKED, MATERIAL, ABSENT } k = ACTION;
@@ -1983,19 +1984,29 @@ void add_model(const Model &md, const float *src, const Term &t, std::vector<flo
 
 // Add a sum of terms into f. False with the reason for a term dress-on does
 // not compute (procedural, corrective, bone, baked, absent) or cannot find.
-// ---- the anime style's plain eye close ------------------------------------------
+// ---- the anime style's eye closes ---------------------------------------------------
 //
-// The upper lid group comes down onto a closing line just above the eye's lower edge; the lower
-// half, the iris and the brow stay still (references: three-vrm-girl Fcl_EYE_Close_L, AliciaSolid
-// blink_l; k, above and margin were tuned leaving one avatar out). The mesh frame is the fit's:
-// Z up, -Y forward, the avatar's left on +X; mm, centred.
+// Two kinds (references/anime-face-shapes.md in the skill notes): the plain close brings the upper
+// lid group down onto a closing line just above the eye's lower edge, the lower half staying; the
+// smile close (^^) also raises the lower lid onto a higher line, so the lids meet near the middle.
+// The iris, highlights and brow never move: the lids cover them. The eye's outline is its white and
+// iris together. k, above, below and margin were tuned leaving one avatar out: plain on
+// three-vrm-girl, AliciaSolid, a VRoid twist sample and a both-eyes-blink avatar; smile on
+// three-vrm-girl, the twist sample and Mire. The mesh frame is the fit's: Z up, -Y forward, the
+// avatar's left on +X; mm, centred.
 
-const double kCloseK = 0.3; // the closing line, as a share of the eye's height above its lower edge
-const double kCloseAbove = 0.6; // lid skin and lashes above the eye follow over this many eye heights
-const double kCloseMargin = 0.5; // past the eye's corners, in eye widths
+struct CloseShape {
+	double k; // the closing line, as a share of the eye's height above its lower edge
+	double above; // lid skin and lashes above the eye follow over this many eye heights
+	double below; // smile: lower-lid skin below the eye rises over this many eye heights (0 = none)
+	double margin; // past the eye's corners, in eye widths
+};
+const CloseShape kPlainClose = { 0.3, 0.6, 0.0, 0.5 };
+const CloseShape kSmileClose = { 0.4, 0.6, 0.2, 0.25 };
 
-// The eye-role vertices split into connected parts when the host named no lash or iris: a part
-// wholly above the largest is a brow, one under 15% of its size a highlight; both stay still.
+// The eye-role vertices split into connected parts when the host named no lash or iris: the largest
+// is the lid and eye white; a part wholly above it is a brow, any other an eyeball, iris or highlight
+// (Mire's eyeball never moves in her own closes; sliding it tore the eye).
 std::vector<uint8_t> eye_parts(const Mesh &ms) {
 	std::vector<uint8_t> role = ms.role;
 	const size_t N = role.size();
@@ -2052,7 +2063,7 @@ std::vector<uint8_t> eye_parts(const Mesh &ms) {
 			for (uint32_t v : p.second) {
 				low = std::min(low, ms.m.v[v].z);
 			}
-			const uint8_t r = low > top ? ROLE_BROW : (double(p.second.size()) < 0.15 * double(parts[big].size()) ? ROLE_IRIS : ROLE_EYE);
+			const uint8_t r = low > top ? ROLE_BROW : ROLE_IRIS;
 			for (uint32_t v : p.second) {
 				role[v] = r;
 			}
@@ -2076,8 +2087,8 @@ double interp(double x, const std::vector<double> &xs, const std::vector<double>
 	return ys[k - 1] + t * (ys[k] - ys[k - 1]);
 }
 
-// out (N*3 mm) += the plain close of one eye (side +1 the avatar's left, -1 its right).
-bool anime_eye_close(const Mesh &ms, int side, std::vector<double> &out, std::string &why) {
+// out (N*3 mm) += one eye's close (side +1 the avatar's left, -1 its right).
+bool anime_eye_close(const Mesh &ms, int side, const CloseShape &cs, std::vector<double> &out, std::string &why) {
 	if (ms.role.size() != ms.m.v.size()) {
 		why = "the anime eye close needs the vertex roles (hf_mesh_set_roles)";
 		return false;
@@ -2087,7 +2098,7 @@ bool anime_eye_close(const Mesh &ms, int side, std::vector<double> &out, std::st
 	std::vector<uint32_t> eye;
 	double x0 = INFINITY, x1 = -INFINITY, fmin = INFINITY;
 	for (size_t i = 0; i < N; ++i) {
-		if (role[i] == ROLE_EYE && (ms.m.v[i].x > 0.0 ? 1 : -1) == side) {
+		if ((role[i] == ROLE_EYE || role[i] == ROLE_IRIS) && (ms.m.v[i].x > 0.0 ? 1 : -1) == side) {
 			eye.push_back(uint32_t(i));
 			x0 = std::min(x0, ms.m.v[i].x);
 			x1 = std::max(x1, ms.m.v[i].x);
@@ -2125,22 +2136,39 @@ bool anime_eye_close(const Mesh &ms, int side, std::vector<double> &out, std::st
 			continue;
 		}
 		const double ox = std::max({ 0.0, x0 - p.x, p.x - x1 }) / W;
-		if (ox > kCloseMargin) {
+		if (ox > cs.margin) {
 			continue;
 		}
-		const double wx = ox <= 0.0 ? 1.0 : (1.0 - ox / kCloseMargin) * (1.0 - ox / kCloseMargin);
+		const double wx = ox <= 0.0 ? 1.0 : (1.0 - ox / cs.margin) * (1.0 - ox / cs.margin);
 		const double l = interp(p.x, xs, lo), t = interp(p.x, xs, hi);
-		const double cl = l + kCloseK * (t - l);
+		const double cl = l + cs.k * (t - l);
 		double dh = 0.0;
 		if (p.z >= cl && p.z <= t) {
 			dh = -(p.z - cl);
-		} else if (p.z > t && p.z <= t + kCloseAbove * H) {
-			const double f = 1.0 - (p.z - t) / (kCloseAbove * H);
+		} else if (p.z > t && p.z <= t + cs.above * H) {
+			const double f = 1.0 - (p.z - t) / (cs.above * H);
 			dh = -(t - cl) * f * f;
+		} else if (cs.below > 0.0 && p.z >= l && p.z < cl) {
+			dh = cl - p.z;
+		} else if (cs.below > 0.0 && p.z >= l - cs.below * H && p.z < l) {
+			const double f = 1.0 - (l - p.z) / (cs.below * H);
+			dh = (cl - l) * f * f;
 		}
 		out[v * 3 + 2] += dh * wx;
 	}
 	return true;
+}
+
+// An anime kind's side and shape, or false when `kind` is not one.
+bool anime_kind(const std::string &kind, int &side, const CloseShape *&cs) {
+	for (int k = 0; k < 4; ++k) {
+		if (kind == kAnimeKinds[k]) {
+			side = k % 2 == 0 ? 1 : -1;
+			cs = k < 2 ? &kPlainClose : &kSmileClose;
+			return true;
+		}
+	}
+	return false;
 }
 
 bool term_fields(Fit &F, const std::vector<Entry> &map, const std::map<std::string, size_t> &by,
@@ -2216,9 +2244,11 @@ bool term_fields(Fit &F, const std::vector<Entry> &map, const std::map<std::stri
 				++f.artists;
 				break;
 			}
-			case Term::PROCEDURAL:
-				if (t.ref == kAnimeKinds[0] || t.ref == kAnimeKinds[1]) {
-					if (!anime_eye_close(*F.ms, t.ref == kAnimeKinds[0] ? 1 : -1, f.art, why)) {
+			case Term::PROCEDURAL: {
+				int side = 0;
+				const CloseShape *cs = nullptr;
+				if (anime_kind(t.ref, side, cs)) {
+					if (!anime_eye_close(*F.ms, side, *cs, f.art, why)) {
 						return false;
 					}
 					++f.artists;
@@ -2226,6 +2256,7 @@ bool term_fields(Fit &F, const std::vector<Entry> &map, const std::map<std::stri
 				}
 				why = "procedural:" + t.ref + " is the next stage (RFD 2275's tongue frame), not computed here";
 				return false;
+			}
 			case Term::CORRECTIVE:
 				why = "corrective:" + t.ref + " is the next stage (RFD 2275/2279), not computed here";
 				return false;
@@ -2913,12 +2944,14 @@ bool anime_shape(int mesh, const std::string &kind, std::vector<float> &deltas, 
 		why = g_err;
 		return false;
 	}
-	if (kind != kAnimeKinds[0] && kind != kAnimeKinds[1]) {
+	int side = 0;
+	const CloseShape *cs = nullptr;
+	if (!anime_kind(kind, side, cs)) {
 		why = g_err = kind + " is not an anime kind";
 		return false;
 	}
 	std::vector<double> out(m->m.v.size() * 3, 0.0);
-	if (!anime_eye_close(*m, kind == kAnimeKinds[0] ? 1 : -1, out, why)) {
+	if (!anime_eye_close(*m, side, *cs, out, why)) {
 		g_err = why;
 		return false;
 	}
