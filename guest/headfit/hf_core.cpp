@@ -2914,13 +2914,15 @@ bool anime_shape(int mesh, const std::string &kind, std::vector<float> &deltas, 
 		return false;
 	}
 	if (kind != kAnimeKinds[0] && kind != kAnimeKinds[1]) {
-		why = kind + " is not an anime kind";
+		why = g_err = kind + " is not an anime kind";
 		return false;
 	}
 	std::vector<double> out(m->m.v.size() * 3, 0.0);
 	if (!anime_eye_close(*m, kind == kAnimeKinds[0] ? 1 : -1, out, why)) {
+		g_err = why;
 		return false;
 	}
+	g_err.clear();
 	deltas.resize(out.size());
 	for (size_t k = 0; k < out.size(); ++k) {
 		deltas[k] = float(out[k] / kMToMm);
