@@ -1989,20 +1989,24 @@ void add_model(const Model &md, const float *src, const Term &t, std::vector<flo
 // Two kinds (references/anime-face-shapes.md in the skill notes): the plain close brings the upper
 // lid group down onto a closing line just above the eye's lower edge, the lower half staying; the
 // smile close (^^) also raises the lower lid onto a higher line, so the lids meet near the middle.
-// The iris, highlights and brow never move: the lids cover them. The eye's outline is its white and
-// iris together. k, above, below and margin were tuned leaving one avatar out: plain on
+// The iris, highlights and brow never move: the lids cover them, and a plain close's line never
+// sits above the iris. The eye's outline is its white and iris together, its lower edge their lower
+// convex hull (a notch in the outline does not pull the edge in). When the eye parts came from
+// geometry and the largest sits above the eyeball (a lash line, Mire), it slides down in one piece,
+// keeping its arc, and the lid skin above it follows it instead of rolling over it. k, above, below and margin were tuned leaving one avatar out: plain on
 // three-vrm-girl, AliciaSolid, a VRoid twist sample and a both-eyes-blink avatar; smile on
 // three-vrm-girl, the twist sample and Mire. The mesh frame is the fit's: Z up, -Y forward, the
 // avatar's left on +X; mm, centred.
 
 struct CloseShape {
 	double k; // the closing line, as a share of the eye's height above its lower edge
+	bool cap; // the closing line never sits above the iris's lower edge (a plain close hides it)
 	double above; // lid skin and lashes above the eye follow over this many eye heights
 	double below; // smile: lower-lid skin below the eye rises over this many eye heights (0 = none)
 	double margin; // past the eye's corners, in eye widths
 };
-const CloseShape kPlainClose = { 0.3, 0.6, 0.0, 0.5 };
-const CloseShape kSmileClose = { 0.4, 0.6, 0.2, 0.25 };
+const CloseShape kPlainClose = { 0.3, true, 0.6, 0.0, 0.5 };
+const CloseShape kSmileClose = { 0.4, false, 0.6, 0.4, 0.25 };
 
 // The eye-role vertices split into connected parts when the host named no lash or iris: the largest
 // is the lid and eye white; a part wholly above it is a brow, any other an eyeball, iris or highlight
@@ -2087,6 +2091,41 @@ double interp(double x, const std::vector<double> &xs, const std::vector<double>
 	return ys[k - 1] + t * (ys[k] - ys[k - 1]);
 }
 
+// The lower convex hull of points (x, z) evaluated at xs: the eye's lower edge.
+std::vector<double> lower_hull_at(std::vector<std::pair<double, double>> pts, const std::vector<double> &xs) {
+	std::sort(pts.begin(), pts.end());
+	std::vector<std::pair<double, double>> h;
+	for (const std::pair<double, double> &p : pts) {
+		while (h.size() >= 2) {
+			const std::pair<double, double> &a = h[h.size() - 2], &b = h.back();
+			if ((b.first - a.first) * (p.second - a.second) - (b.second - a.second) * (p.first - a.first) <= 0.0) {
+				h.pop_back();
+			} else {
+				break;
+			}
+		}
+		h.push_back(p);
+	}
+	std::vector<double> hx, hz, out;
+	for (const std::pair<double, double> &p : h) {
+		hx.push_back(p.first), hz.push_back(p.second);
+	}
+	for (double x : xs) {
+		out.push_back(interp(x, hx, hz));
+	}
+	return out;
+}
+
+// numpy's linear quantile.
+double quantile(std::vector<double> v, double q) {
+	std::sort(v.begin(), v.end());
+	const double at = q * double(v.size() - 1);
+	const size_t i = size_t(at);
+	return i + 1 < v.size() ? v[i] + (at - double(i)) * (v[i + 1] - v[i]) : v[i];
+}
+
+const double kLashSlideQuantile = 0.3; // the lash line lands with 70% of its columns at or below the line
+
 // out (N*3 mm) += one eye's close (side +1 the avatar's left, -1 its right).
 bool anime_eye_close(const Mesh &ms, int side, const CloseShape &cs, std::vector<double> &out, std::string &why) {
 	if (ms.role.size() != ms.m.v.size()) {
@@ -2094,12 +2133,19 @@ bool anime_eye_close(const Mesh &ms, int side, const CloseShape &cs, std::vector
 		return false;
 	}
 	const std::vector<uint8_t> role = eye_parts(ms);
+	bool named = false;
+	for (uint8_t r : ms.role) {
+		named = named || r == ROLE_LASH || r == ROLE_IRIS;
+	}
 	const size_t N = ms.m.v.size();
+	const auto on = [&](size_t i) { return (ms.m.v[i].x > 0.0 ? 1 : -1) == side; };
 	std::vector<uint32_t> eye;
+	std::vector<std::pair<double, double>> pts;
 	double x0 = INFINITY, x1 = -INFINITY, fmin = INFINITY;
 	for (size_t i = 0; i < N; ++i) {
-		if ((role[i] == ROLE_EYE || role[i] == ROLE_IRIS) && (ms.m.v[i].x > 0.0 ? 1 : -1) == side) {
+		if ((role[i] == ROLE_EYE || role[i] == ROLE_IRIS) && on(i)) {
 			eye.push_back(uint32_t(i));
+			pts.push_back({ ms.m.v[i].x, ms.m.v[i].z });
 			x0 = std::min(x0, ms.m.v[i].x);
 			x1 = std::max(x1, ms.m.v[i].x);
 			fmin = std::min(fmin, -ms.m.v[i].y);
@@ -2109,30 +2155,53 @@ bool anime_eye_close(const Mesh &ms, int side, const CloseShape &cs, std::vector
 		why = fmt("no eye vertices on the %s side", side > 0 ? "left" : "right");
 		return false;
 	}
-	// The outline's lower and upper edge in ten bins across the eye.
-	std::vector<double> xs, lo, hi;
+	// The outline's upper edge in ten bins across the eye, and per bin the iris's and the lash
+	// line's (the largest part's) lowest point.
+	std::vector<double> xs, hi, ix, il, lx, ll, gx;
+	std::vector<double> bin_hi;
 	for (int b = 0; b < 10; ++b) {
 		const double a = x0 + (x1 - x0) * b / 10.0, e = x0 + (x1 - x0) * (b + 1) / 10.0;
-		double sx = 0.0, l = INFINITY, h = -INFINITY;
-		int n = 0;
+		double sx = 0.0, h = -INFINITY, isx = 0.0, ilo = INFINITY, lsx = 0.0, llo = INFINITY;
+		int n = 0, ni = 0, nl = 0;
 		for (uint32_t v : eye) {
 			const hfg::V3 &p = ms.m.v[v];
 			if (p.x >= a && p.x <= e) {
-				sx += p.x, l = std::min(l, p.z), h = std::max(h, p.z), ++n;
+				sx += p.x, h = std::max(h, p.z), ++n;
+				if (role[v] == ROLE_IRIS) {
+					isx += p.x, ilo = std::min(ilo, p.z), ++ni;
+				} else {
+					lsx += p.x, llo = std::min(llo, p.z), ++nl;
+				}
 			}
 		}
 		if (n) {
-			xs.push_back(sx / n), lo.push_back(l), hi.push_back(h);
+			xs.push_back(sx / n), hi.push_back(h);
+		}
+		if (ni) {
+			ix.push_back(isx / ni), il.push_back(ilo);
+		}
+		if (n && nl) {
+			lx.push_back(lsx / nl), ll.push_back(llo), gx.push_back(sx / n);
 		}
 	}
+	const std::vector<double> lo = lower_hull_at(pts, xs);
 	double H = 0.0;
 	for (size_t k = 0; k < xs.size(); ++k) {
 		H = std::max(H, hi[k] - lo[k]);
 	}
+	// The closing line at x, from the outline at x.
+	const auto closing = [&](double x, double l, double t) {
+		double cl = std::min(l + cs.k * (t - l), t);
+		if (cs.cap && !ix.empty()) {
+			cl = std::max(std::min(cl, interp(x, ix, il)), l);
+		}
+		return cl;
+	};
 	const double W = x1 - x0, front = fmin - 0.25 * H;
+	std::vector<double> dz(N, 0.0);
 	for (size_t v = 0; v < N; ++v) {
 		const hfg::V3 &p = ms.m.v[v];
-		if ((p.x > 0.0 ? 1 : -1) != side || role[v] == ROLE_IRIS || role[v] == ROLE_BROW || -p.y < front) {
+		if (!on(v) || role[v] == ROLE_IRIS || role[v] == ROLE_BROW || -p.y < front) {
 			continue;
 		}
 		const double ox = std::max({ 0.0, x0 - p.x, p.x - x1 }) / W;
@@ -2141,7 +2210,7 @@ bool anime_eye_close(const Mesh &ms, int side, const CloseShape &cs, std::vector
 		}
 		const double wx = ox <= 0.0 ? 1.0 : (1.0 - ox / cs.margin) * (1.0 - ox / cs.margin);
 		const double l = interp(p.x, xs, lo), t = interp(p.x, xs, hi);
-		const double cl = l + cs.k * (t - l);
+		const double cl = closing(p.x, l, t);
 		double dh = 0.0;
 		if (p.z >= cl && p.z <= t) {
 			dh = -(p.z - cl);
@@ -2154,7 +2223,31 @@ bool anime_eye_close(const Mesh &ms, int side, const CloseShape &cs, std::vector
 			const double f = 1.0 - (l - p.z) / (cs.below * H);
 			dh = (cl - l) * f * f;
 		}
-		out[v * 3 + 2] += dh * wx;
+		dz[v] = dh * wx;
+	}
+	// The lash line slides down in one piece, and the lid skin at and above it moves with it.
+	if (!named && !lx.empty()) {
+		std::vector<double> gaps;
+		for (size_t k = 0; k < lx.size(); ++k) {
+			const double l = interp(gx[k], xs, lo), t = interp(gx[k], xs, hi);
+			gaps.push_back(closing(gx[k], l, t) - ll[k]);
+		}
+		const double shift = quantile(gaps, kLashSlideQuantile);
+		if (shift < 0.0) {
+			for (size_t v = 0; v < N; ++v) {
+				if (!on(v)) {
+					continue;
+				}
+				if (role[v] == ROLE_EYE) {
+					dz[v] = shift;
+				} else if (dz[v] < 0.0 && ms.m.v[v].z >= interp(ms.m.v[v].x, lx, ll)) {
+					dz[v] = std::max(dz[v], shift);
+				}
+			}
+		}
+	}
+	for (size_t v = 0; v < N; ++v) {
+		out[v * 3 + 2] += dz[v];
 	}
 	return true;
 }
