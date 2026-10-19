@@ -56,6 +56,7 @@ enum Weight : int {
 	W_NR_STIFF, // the first round's membrane stiffness; it halves each round
 	W_NR_ITERS, // conjugate-gradient iterations per round
 	W_NR_REACH, // the first round's correspondence cut-off (mm); it falls to W_MAXDIST by the last
+	W_STYLE, // 0 reference; 1 anime: a model vertex in reach whose surface faces away has no anime counterpart
 	W_COUNT,
 };
 extern const float kWeightDefaults[W_COUNT];

@@ -39,6 +39,7 @@ const float kWeightDefaults[W_COUNT] = {
 	16.0f, // W_NR_STIFF
 	200.0f, // W_NR_ITERS
 	32.0f, // W_NR_REACH (mm)
+	0.0f, // W_STYLE
 };
 
 const char *region_name(int r) {
@@ -2399,7 +2400,7 @@ struct Xfer {
 	Fields fd;
 	std::vector<float> out; // N*3 mm
 	uint32_t cur = 0;
-	uint32_t support = 0, moved = 0, reached = 0, art_moved = 0;
+	uint32_t support = 0, moved = 0, reached = 0, art_moved = 0, replaced = 0;
 	double ess = 0, mss = 0;
 	double ess_r = 0, mss_r = 0; // over the reached vertices only
 	double ess_lab[R_COUNT][2] = {}; // the error by region, unreached [0] and reached [1]
@@ -2512,8 +2513,15 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 				for (int r = 0; r < 3; ++r) {
 					sd[r] = x[9] * (X.R[r * 3] * d[0] + X.R[r * 3 + 1] * d[1] + X.R[r * 3 + 2] * d[2]);
 				}
-				X.mss += sd[0] * sd[0] + sd[1] * sd[1] + sd[2] * sd[2];
 				const Corr c = correspond(F, F.fpos, i, F.fmn, F.W[W_MAXDIST]);
+				// Anime style: in reach, off the boundary, but facing away (an inner
+				// lip, an eyeball) is a part the anime face replaces, not an error.
+				if (!c.ok && F.W[W_STYLE] >= 1.0f && c.c.tri >= 0 && !on_boundary(F, c.c) &&
+						std::sqrt(c.c.d2) <= F.W[W_MAXDIST]) {
+					++X.replaced;
+					continue;
+				}
+				X.mss += sd[0] * sd[0] + sd[1] * sd[1] + sd[2] * sd[2];
 				double back[3] = { 0, 0, 0 };
 				if (c.ok) {
 					++X.reached;
@@ -2554,8 +2562,9 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 										"look correct",
 											X.shape.c_str()));
 			}
-			X.error_mm = X.support ? float(std::sqrt(X.ess / X.support)) : 0.0f;
-			const double mag = X.support ? std::sqrt(X.mss / X.support) : 0.0;
+			const uint32_t judged = X.support - X.replaced;
+			X.error_mm = judged ? float(std::sqrt(X.ess / judged)) : 0.0f;
+			const double mag = judged ? std::sqrt(X.mss / judged) : 0.0;
 			const bool hits = F.hst == Fit::H_READY;
 			X.info = fmt("shape %s form %s actions %d units %d artists %d support %u reached %u unreached %u "
 						 "avatar_moved %u artist_moved %u avatar_matched %u avatar_unmatched %u magnitude_mm %.4f "
@@ -2564,6 +2573,7 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 					X.reached, X.support - X.reached, X.moved, X.art_moved, hits ? F.matched : 0u,
 					hits ? N - F.matched : 0u, mag, double(X.error_mm), mag > 0 ? double(X.error_mm) / mag : 0.0, X.reached ? std::sqrt(X.ess_r / X.reached) : 0.0,
 					X.mss_r > 0 ? std::sqrt(X.ess_r / X.mss_r) : 0.0);
+			X.info += fmt(" style %s replaced %u", F.W[W_STYLE] >= 1.0f ? "anime" : "reference", X.replaced);
 			X.info += " " + nr_info(F);
 			for (int r = 0; r < R_COUNT; ++r) {
 				if (X.ess > 0.0 && X.ess_lab[r][0] + X.ess_lab[r][1] > 0.0) {
