@@ -35,6 +35,11 @@ const float kWeightDefaults[W_COUNT] = {
 	6.0f, // W_ROUNDS
 	60.0f, // W_ITERS
 	8.0f, // W_MAXDIST (mm)
+	8.0f, // W_NR_ROUNDS
+	16.0f, // W_NR_STIFF
+	200.0f, // W_NR_ITERS
+	32.0f, // W_NR_REACH (mm)
+	0.0f, // W_STYLE
 };
 
 const char *region_name(int r) {
@@ -432,6 +437,7 @@ struct Mesh {
 	double origin[3] = { 0, 0, 0 };
 	std::vector<std::string> shape_names;
 	std::vector<std::vector<float>> shapes; // the avatar's own shapes (hf_mesh_add_shape), dense, metres
+	std::vector<uint8_t> role; // per vertex, ROLE_* (hf_mesh_set_roles); empty when the host gave none
 };
 
 struct Marks {
@@ -1051,6 +1057,8 @@ std::string unit_key(const char *race, const std::string &name) {
 }
 
 const char *const kProcedural[7] ={ "out_step1", "out_step2", "roll", "twist_left", "twist_right", "flat", "squish" };
+// The anime style's own kinds, computed on the avatar mesh from its roles (hf_mesh_set_roles).
+const char *const kAnimeKinds[2] = { "anime_eye_close_plain_left", "anime_eye_close_plain_right" };
 
 struct Term {
 	enum K { ACTION, ENTRY, UNIT, ARTIST, PROCEDURAL, CORRECTIVE, BONE, BAKED, MATERIAL, ABSENT } k = ACTION;
@@ -1103,7 +1111,20 @@ bool has_prefix(const std::string &s, const char *p, std::string &rest) {
 
 // Parse the map's syntax; names are resolved by resolve_map. Syntax errors go
 // to errs with their line; false only when the map was never uploaded.
-bool parse_map(std::vector<Entry> &out, std::string &errs) {
+// An anime line replaces the line of the same name; anime lines come last in the map.
+void put_entry(std::vector<Entry> &out, const Entry &e, bool anime_line) {
+	if (anime_line) {
+		for (Entry &o : out) {
+			if (o.name == e.name) {
+				o = e;
+				return;
+			}
+		}
+	}
+	out.push_back(e);
+}
+
+bool parse_map(std::vector<Entry> &out, std::string &errs, bool anime = false) {
 	auto it = raw().find("unified_expressions.map");
 	if (it == raw().end()) {
 		return fail("missing unified_expressions.map (upload it with hf_data_put)");
@@ -1122,6 +1143,15 @@ bool parse_map(std::vector<Entry> &out, std::string &errs) {
 			continue;
 		}
 		std::string rest;
+		// `@anime Name <= ...` replaces Name's line in the anime style only.
+		bool anime_line = false;
+		if (has_prefix(line, "@anime", rest)) {
+			if (!anime) {
+				continue;
+			}
+			line = trim(rest);
+			anime_line = true;
+		}
 		if (has_prefix(line, "@stage", rest)) {
 			char *q = nullptr;
 			const long s = std::strtol(rest.c_str(), &q, 10);
@@ -1156,7 +1186,7 @@ bool parse_map(std::vector<Entry> &out, std::string &errs) {
 			}
 			e.terms.push_back(t);
 			e.form = "absent";
-			out.push_back(e);
+			put_entry(out, e, anime_line);
 			continue;
 		}
 		bool ok = true;
@@ -1252,7 +1282,7 @@ bool parse_map(std::vector<Entry> &out, std::string &errs) {
 		} else {
 			e.form = !t0.masks.empty() ? "mask" : (t0.scale != 1.0 ? "scaled" : "direct");
 		}
-		out.push_back(e);
+		put_entry(out, e, anime_line);
 	}
 	return true;
 }
@@ -1288,6 +1318,9 @@ void resolve_map(std::vector<Entry> &map, std::string &unknown, uint32_t &nunkno
 			} else if (t.k == Term::PROCEDURAL) {
 				bool known = false;
 				for (const char *p : kProcedural) {
+					known = known || t.ref == p;
+				}
+				for (const char *p : kAnimeKinds) {
 					known = known || t.ref == p;
 				}
 				if (!known) {
@@ -1416,7 +1449,7 @@ struct Fit {
 	double f = 0.0;
 	// The final pose and the transfer's hits, made once, when a transfer asks.
 	Pipe rp;
-	enum HState { H_NONE, H_POSE, H_NORMALS, H_BVH, H_RAYS, H_READY } hst = H_NONE;
+	enum HState { H_NONE, H_POSE, H_NR_SETUP, H_NR_NORMALS, H_NR_CORR, H_NR_SOLVE, H_NORMALS, H_BVH, H_RAYS, H_READY } hst = H_NONE;
 	std::vector<float> fpos;
 	std::vector<hfg::V3> fmn;
 	hfg::Mesh pmesh; // the posed model (pbvh points into it)
@@ -1424,6 +1457,14 @@ struct Fit {
 	std::vector<uint32_t> hit;
 	std::vector<float> bary;
 	uint32_t matched = 0;
+	// The non-rigid step (W_NR_*): per-vertex offsets on the fitted pose (mm),
+	// a membrane over the model's edges, solved by Jacobi-preconditioned CG.
+	std::vector<double> nrd, nrw, nrb, nrr, nrz, nrp, nrap, nrdiag;
+	std::vector<uint32_t> nradj_off, nradj;
+	std::vector<hfg::V3> nrmn;
+	int nr_round = 0, nr_iter = 0;
+	uint32_t nr_valid = 0;
+	double nr_alpha = 0.0, nr_rz = 0.0;
 };
 
 void pipe_start(Pipe &p, const Model &md, const std::vector<float> &x, bool grad, uint32_t n, uint32_t K, uint32_t PS = 0) {
@@ -1942,6 +1983,166 @@ void add_model(const Model &md, const float *src, const Term &t, std::vector<flo
 
 // Add a sum of terms into f. False with the reason for a term dress-on does
 // not compute (procedural, corrective, bone, baked, absent) or cannot find.
+// ---- the anime style's plain eye close ------------------------------------------
+//
+// The upper lid group comes down onto a closing line just above the eye's lower edge; the lower
+// half, the iris and the brow stay still (references: three-vrm-girl Fcl_EYE_Close_L, AliciaSolid
+// blink_l; k, above and margin were tuned leaving one avatar out). The mesh frame is the fit's:
+// Z up, -Y forward, the avatar's left on +X; mm, centred.
+
+const double kCloseK = 0.3; // the closing line, as a share of the eye's height above its lower edge
+const double kCloseAbove = 0.6; // lid skin and lashes above the eye follow over this many eye heights
+const double kCloseMargin = 0.5; // past the eye's corners, in eye widths
+
+// The eye-role vertices split into connected parts when the host named no lash or iris: a part
+// wholly above the largest is a brow, one under 15% of its size a highlight; both stay still.
+std::vector<uint8_t> eye_parts(const Mesh &ms) {
+	std::vector<uint8_t> role = ms.role;
+	const size_t N = role.size();
+	bool named = false;
+	for (uint8_t r : role) {
+		named = named || r == ROLE_LASH || r == ROLE_IRIS;
+	}
+	if (named) {
+		return role;
+	}
+	std::vector<uint32_t> par(N);
+	for (size_t i = 0; i < N; ++i) {
+		par[i] = uint32_t(i);
+	}
+	std::function<uint32_t(uint32_t)> find = [&](uint32_t a) -> uint32_t {
+		while (par[a] != a) {
+			par[a] = par[par[a]];
+			a = par[a];
+		}
+		return a;
+	};
+	for (size_t t = 0; t + 2 < ms.m.t.size(); t += 3) {
+		const uint32_t a = ms.m.t[t], b = ms.m.t[t + 1], c = ms.m.t[t + 2];
+		if (role[a] == ROLE_EYE && role[b] == ROLE_EYE && role[c] == ROLE_EYE) {
+			par[find(a)] = find(b);
+			par[find(c)] = find(b);
+		}
+	}
+	for (int side = -1; side <= 1; side += 2) {
+		std::map<uint32_t, std::vector<uint32_t>> parts;
+		for (size_t i = 0; i < N; ++i) {
+			if (role[i] == ROLE_EYE && (ms.m.v[i].x > 0.0 ? 1 : -1) == side) {
+				parts[find(uint32_t(i))].push_back(uint32_t(i));
+			}
+		}
+		if (parts.empty()) {
+			continue;
+		}
+		uint32_t big = parts.begin()->first;
+		for (const std::pair<const uint32_t, std::vector<uint32_t>> &p : parts) {
+			if (p.second.size() > parts[big].size()) {
+				big = p.first;
+			}
+		}
+		double top = -INFINITY;
+		for (uint32_t v : parts[big]) {
+			top = std::max(top, ms.m.v[v].z);
+		}
+		for (const std::pair<const uint32_t, std::vector<uint32_t>> &p : parts) {
+			if (p.first == big) {
+				continue;
+			}
+			double low = INFINITY;
+			for (uint32_t v : p.second) {
+				low = std::min(low, ms.m.v[v].z);
+			}
+			const uint8_t r = low > top ? ROLE_BROW : (double(p.second.size()) < 0.15 * double(parts[big].size()) ? ROLE_IRIS : ROLE_EYE);
+			for (uint32_t v : p.second) {
+				role[v] = r;
+			}
+		}
+	}
+	return role;
+}
+
+double interp(double x, const std::vector<double> &xs, const std::vector<double> &ys) {
+	if (x <= xs.front()) {
+		return ys.front();
+	}
+	if (x >= xs.back()) {
+		return ys.back();
+	}
+	size_t k = 1;
+	while (xs[k] < x) {
+		++k;
+	}
+	const double t = (x - xs[k - 1]) / (xs[k] - xs[k - 1]);
+	return ys[k - 1] + t * (ys[k] - ys[k - 1]);
+}
+
+// out (N*3 mm) += the plain close of one eye (side +1 the avatar's left, -1 its right).
+bool anime_eye_close(const Mesh &ms, int side, std::vector<double> &out, std::string &why) {
+	if (ms.role.size() != ms.m.v.size()) {
+		why = "the anime eye close needs the vertex roles (hf_mesh_set_roles)";
+		return false;
+	}
+	const std::vector<uint8_t> role = eye_parts(ms);
+	const size_t N = ms.m.v.size();
+	std::vector<uint32_t> eye;
+	double x0 = INFINITY, x1 = -INFINITY, fmin = INFINITY;
+	for (size_t i = 0; i < N; ++i) {
+		if (role[i] == ROLE_EYE && (ms.m.v[i].x > 0.0 ? 1 : -1) == side) {
+			eye.push_back(uint32_t(i));
+			x0 = std::min(x0, ms.m.v[i].x);
+			x1 = std::max(x1, ms.m.v[i].x);
+			fmin = std::min(fmin, -ms.m.v[i].y);
+		}
+	}
+	if (eye.size() < 3 || x1 <= x0) {
+		why = fmt("no eye vertices on the %s side", side > 0 ? "left" : "right");
+		return false;
+	}
+	// The outline's lower and upper edge in ten bins across the eye.
+	std::vector<double> xs, lo, hi;
+	for (int b = 0; b < 10; ++b) {
+		const double a = x0 + (x1 - x0) * b / 10.0, e = x0 + (x1 - x0) * (b + 1) / 10.0;
+		double sx = 0.0, l = INFINITY, h = -INFINITY;
+		int n = 0;
+		for (uint32_t v : eye) {
+			const hfg::V3 &p = ms.m.v[v];
+			if (p.x >= a && p.x <= e) {
+				sx += p.x, l = std::min(l, p.z), h = std::max(h, p.z), ++n;
+			}
+		}
+		if (n) {
+			xs.push_back(sx / n), lo.push_back(l), hi.push_back(h);
+		}
+	}
+	double H = 0.0;
+	for (size_t k = 0; k < xs.size(); ++k) {
+		H = std::max(H, hi[k] - lo[k]);
+	}
+	const double W = x1 - x0, front = fmin - 0.25 * H;
+	for (size_t v = 0; v < N; ++v) {
+		const hfg::V3 &p = ms.m.v[v];
+		if ((p.x > 0.0 ? 1 : -1) != side || role[v] == ROLE_IRIS || role[v] == ROLE_BROW || -p.y < front) {
+			continue;
+		}
+		const double ox = std::max({ 0.0, x0 - p.x, p.x - x1 }) / W;
+		if (ox > kCloseMargin) {
+			continue;
+		}
+		const double wx = ox <= 0.0 ? 1.0 : (1.0 - ox / kCloseMargin) * (1.0 - ox / kCloseMargin);
+		const double l = interp(p.x, xs, lo), t = interp(p.x, xs, hi);
+		const double cl = l + kCloseK * (t - l);
+		double dh = 0.0;
+		if (p.z >= cl && p.z <= t) {
+			dh = -(p.z - cl);
+		} else if (p.z > t && p.z <= t + kCloseAbove * H) {
+			const double f = 1.0 - (p.z - t) / (kCloseAbove * H);
+			dh = -(t - cl) * f * f;
+		}
+		out[v * 3 + 2] += dh * wx;
+	}
+	return true;
+}
+
 bool term_fields(Fit &F, const std::vector<Entry> &map, const std::map<std::string, size_t> &by,
 		const std::vector<Term> &terms, Fields &f, std::string &why, int depth) {
 	const Model &md = *F.md;
@@ -2016,6 +2217,13 @@ bool term_fields(Fit &F, const std::vector<Entry> &map, const std::map<std::stri
 				break;
 			}
 			case Term::PROCEDURAL:
+				if (t.ref == kAnimeKinds[0] || t.ref == kAnimeKinds[1]) {
+					if (!anime_eye_close(*F.ms, t.ref == kAnimeKinds[0] ? 1 : -1, f.art, why)) {
+						return false;
+					}
+					++f.artists;
+					break;
+				}
 				why = "procedural:" + t.ref + " is the next stage (RFD 2275's tongue frame), not computed here";
 				return false;
 			case Term::CORRECTIVE:
@@ -2090,6 +2298,206 @@ RegionStat region_stat(const Fit &F, const Posed &ps, int region) {
 	return s;
 }
 
+// ---- the non-rigid step: made once per fit, in items, before the hits ------------
+
+const double kNrMark = 10.0; // a mark's weight next to a surface vertex's 1
+const double kNrEps = 1e-3; // holds vertices no term reaches at their fitted place
+
+// y = A x, A = diag(nrdiag - alpha * degree) + alpha * L over the three axes.
+void nr_apply(const Fit &F, const std::vector<double> &x, std::vector<double> &y) {
+	const uint32_t P = uint32_t(F.nradj_off.size() - 1);
+	for (uint32_t i = 0; i < P; ++i) {
+		const uint32_t b = F.nradj_off[i], e = F.nradj_off[i + 1];
+		const double deg = double(e - b);
+		for (int r = 0; r < 3; ++r) {
+			double s = (F.nrw[i] + kNrEps + F.nr_alpha * deg) * x[i * 3 + r];
+			for (uint32_t k = b; k < e; ++k) {
+				s -= F.nr_alpha * x[F.nradj[k] * 3 + r];
+			}
+			y[i * 3 + r] = s;
+		}
+	}
+}
+
+double nr_dot(const std::vector<double> &a, const std::vector<double> &b) {
+	double s = 0.0;
+	for (size_t k = 0; k < a.size(); ++k) {
+		s += a[k] * b[k];
+	}
+	return s;
+}
+
+// This round's cut-off: W_NR_REACH in the first round down to W_MAXDIST in the last.
+double nr_reach(const Fit &F) {
+	const int R = std::max(1, int(F.W[W_NR_ROUNDS]));
+	const double t = R > 1 ? double(F.nr_round) / double(R - 1) : 1.0;
+	const double r0 = std::max(F.W[W_NR_REACH], F.W[W_MAXDIST]);
+	return r0 + (double(F.W[W_MAXDIST]) - r0) * t;
+}
+
+// One item of the non-rigid step; true when the offsets are final.
+bool nr_item(Fit &F, Gas &gas) {
+	const Model &md = *F.md;
+	const uint32_t P = md.P;
+	switch (F.hst) {
+		case Fit::H_NR_SETUP: {
+			std::vector<std::vector<uint32_t>> nb(P);
+			for (size_t t = 0; t + 2 < md.tri.size(); t += 3) {
+				for (int k = 0; k < 3; ++k) {
+					const uint32_t a = md.tri[t + size_t(k)], b = md.tri[t + size_t((k + 1) % 3)];
+					nb[a].push_back(b);
+					nb[b].push_back(a);
+				}
+			}
+			F.nradj_off.assign(size_t(P) + 1, 0u);
+			F.nradj.clear();
+			for (uint32_t i = 0; i < P; ++i) {
+				std::sort(nb[i].begin(), nb[i].end());
+				nb[i].erase(std::unique(nb[i].begin(), nb[i].end()), nb[i].end());
+				F.nradj.insert(F.nradj.end(), nb[i].begin(), nb[i].end());
+				F.nradj_off[i + 1] = uint32_t(F.nradj.size());
+			}
+			F.nrd.assign(size_t(P) * 3, 0.0);
+			F.nr_round = 0;
+			gas.spend(kilo(size_t(md.tri.size()) * 16));
+			F.hst = Fit::H_NR_NORMALS;
+			return false;
+		}
+		case Fit::H_NR_NORMALS: {
+			F.fpos.assign(size_t(P) * 3, 0.0f);
+			for (size_t k = 0; k < F.fpos.size(); ++k) {
+				F.fpos[k] = float(double(F.rp.pos[k]) + F.nrd[k]);
+			}
+			F.nrmn = model_normals(md, F.fpos);
+			F.nrw.assign(P, 0.0);
+			F.nrb.assign(size_t(P) * 3, 0.0);
+			F.nr_valid = 0;
+			F.cur = 0;
+			gas.spend(kilo(size_t(md.tri.size()) * 8));
+			F.hst = Fit::H_NR_CORR;
+			return false;
+		}
+		case Fit::H_NR_CORR: {
+			// 64 model vertices: each one's closest avatar point at the current
+			// offsets, with the fit's region weights; the marks pull too.
+			const float wr[R_COUNT] = { 0.0f, F.W[W_FACE], F.W[W_MOUTH], F.W[W_NOSE], F.W[W_EYES], F.W[W_CRANIUM], 0.0f };
+			const uint32_t end = std::min(P, F.cur + 64);
+			for (uint32_t i = F.cur; i < end; ++i) {
+				const Corr c = correspond(F, F.fpos, i, F.nrmn, nr_reach(F));
+				if (!c.ok || wr[md.label[i]] <= 0.0f) {
+					continue;
+				}
+				const double w = double(wr[md.label[i]]);
+				const double q[3] = { c.c.q.x, c.c.q.y, c.c.q.z };
+				F.nrw[i] += w;
+				for (int r = 0; r < 3; ++r) {
+					F.nrb[i * 3 + r] += w * (q[r] - double(F.rp.pos[i * 3 + r]));
+				}
+				++F.nr_valid;
+			}
+			gas.spend(kilo(size_t(end - F.cur) * 512));
+			F.cur = end;
+			if (F.cur < P) {
+				return false;
+			}
+			for (uint32_t k = 0; k < F.K; ++k) {
+				const uint32_t i = F.mid[k];
+				F.nrw[i] += kNrMark;
+				for (int r = 0; r < 3; ++r) {
+					F.nrb[i * 3 + r] += kNrMark * (double(F.tgtK[k * 3 + r]) - double(F.rp.pos[i * 3 + r]));
+				}
+			}
+			F.nr_alpha = double(F.W[W_NR_STIFF]) / std::pow(2.0, double(F.nr_round));
+			F.nrdiag.assign(P, 0.0);
+			for (uint32_t i = 0; i < P; ++i) {
+				F.nrdiag[i] = F.nrw[i] + kNrEps + F.nr_alpha * double(F.nradj_off[i + 1] - F.nradj_off[i]);
+			}
+			// CG from the previous round's offsets.
+			F.nrap.assign(size_t(P) * 3, 0.0);
+			nr_apply(F, F.nrd, F.nrap);
+			F.nrr.assign(size_t(P) * 3, 0.0);
+			F.nrz.assign(size_t(P) * 3, 0.0);
+			for (size_t k = 0; k < F.nrr.size(); ++k) {
+				F.nrr[k] = F.nrb[k] - F.nrap[k];
+				F.nrz[k] = F.nrr[k] / F.nrdiag[k / 3];
+			}
+			F.nrp = F.nrz;
+			F.nr_rz = nr_dot(F.nrr, F.nrz);
+			F.nr_iter = 0;
+			F.hst = Fit::H_NR_SOLVE;
+			return false;
+		}
+		case Fit::H_NR_SOLVE: {
+			// Ten CG iterations an item.
+			const int iters = std::max(1, int(F.W[W_NR_ITERS]));
+			for (int s = 0; s < 10 && F.nr_iter < iters && F.nr_rz > 0.0; ++s, ++F.nr_iter) {
+				nr_apply(F, F.nrp, F.nrap);
+				const double pap = nr_dot(F.nrp, F.nrap);
+				if (pap <= 0.0) {
+					break;
+				}
+				const double a = F.nr_rz / pap;
+				for (size_t k = 0; k < F.nrd.size(); ++k) {
+					F.nrd[k] += a * F.nrp[k];
+					F.nrr[k] -= a * F.nrap[k];
+					F.nrz[k] = F.nrr[k] / F.nrdiag[k / 3];
+				}
+				const double rz = nr_dot(F.nrr, F.nrz);
+				const double beta = rz / F.nr_rz;
+				F.nr_rz = rz;
+				for (size_t k = 0; k < F.nrp.size(); ++k) {
+					F.nrp[k] = F.nrz[k] + beta * F.nrp[k];
+				}
+			}
+			gas.spend(kilo(size_t(P) * 3 * 64));
+			if (F.nr_iter < iters && F.nr_rz > 0.0) {
+				return false;
+			}
+			if (++F.nr_round < int(F.W[W_NR_ROUNDS])) {
+				F.hst = Fit::H_NR_NORMALS;
+				return false;
+			}
+			return true;
+		}
+		default:
+			return true;
+	}
+}
+
+// The non-rigid offsets' size (mm), for the reports.
+std::string nr_info(const Fit &F) {
+	if (F.nrd.empty()) {
+		return "nr_rounds 0";
+	}
+	double ss = 0.0, mx = 0.0;
+	const uint32_t P = uint32_t(F.nrd.size() / 3);
+	for (uint32_t i = 0; i < P; ++i) {
+		const double m2 = F.nrd[i * 3] * F.nrd[i * 3] + F.nrd[i * 3 + 1] * F.nrd[i * 3 + 1] + F.nrd[i * 3 + 2] * F.nrd[i * 3 + 2];
+		ss += m2;
+		mx = std::max(mx, std::sqrt(m2));
+	}
+	std::string out = fmt("nr_rounds %d nr_valid %u nr_rms_mm %.4f nr_max_mm %.4f", F.nr_round, F.nr_valid, std::sqrt(ss / P), mx);
+	if (!F.fmn.empty()) {
+		uint32_t ok[R_COUNT] = { 0 }, all[R_COUNT] = { 0 }, far[R_COUNT] = { 0 }, face[R_COUNT] = { 0 };
+		for (uint32_t i = 0; i < P; ++i) {
+			const uint8_t l = F.md->label[i];
+			++all[l];
+			const Corr c = correspond(F, F.fpos, i, F.fmn, F.W[W_MAXDIST]);
+			if (c.ok) {
+				++ok[l];
+			} else if (c.c.tri >= 0 && std::sqrt(c.c.d2) > F.W[W_MAXDIST]) {
+				++far[l];
+			} else {
+				++face[l];
+			}
+		}
+		for (int r = 0; r < R_COUNT; ++r) {
+			out += fmt(" reach_%s %u/%u far %u other %u", region_name(r), ok[r], all[r], far[r], face[r]);
+		}
+	}
+	return out;
+}
+
 // ---- the transfer's hits: made once per fit, in items ----------------------------
 
 // One item; true when the hits are ready. Only on a finished fit.
@@ -2103,11 +2511,22 @@ bool hits_item(Fit &F, Gas &gas) {
 			return false;
 		case Fit::H_POSE:
 			if (pipe_item(F.rp, F, gas)) {
+				F.hst = int(F.W[W_NR_ROUNDS]) > 0 ? Fit::H_NR_SETUP : Fit::H_NORMALS;
+			}
+			return false;
+		case Fit::H_NR_SETUP:
+		case Fit::H_NR_NORMALS:
+		case Fit::H_NR_CORR:
+		case Fit::H_NR_SOLVE:
+			if (nr_item(F, gas)) {
 				F.hst = Fit::H_NORMALS;
 			}
 			return false;
 		case Fit::H_NORMALS:
 			F.fpos = F.rp.pos;
+			for (size_t k = 0; k < F.nrd.size(); ++k) {
+				F.fpos[k] = float(double(F.rp.pos[k]) + F.nrd[k]);
+			}
 			F.fmn = model_normals(md, F.fpos);
 			F.pmesh.v.resize(md.P);
 			for (uint32_t i = 0; i < md.P; ++i) {
@@ -2176,9 +2595,10 @@ struct Xfer {
 	Fields fd;
 	std::vector<float> out; // N*3 mm
 	uint32_t cur = 0;
-	uint32_t support = 0, moved = 0, reached = 0, art_moved = 0;
+	uint32_t support = 0, moved = 0, reached = 0, art_moved = 0, replaced = 0;
 	double ess = 0, mss = 0;
 	double ess_r = 0, mss_r = 0; // over the reached vertices only
+	double ess_lab[R_COUNT][2] = {}; // the error by region, unreached [0] and reached [1]
 	double R[9];
 	std::string form = "action", info, err;
 	float error_mm = 0.0f;
@@ -2209,7 +2629,7 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 				} else {
 					std::string errs, unknown;
 					uint32_t nunknown = 0;
-					if (!parse_map(map, errs)) {
+					if (!parse_map(map, errs, F.W[W_STYLE] >= 1.0f)) {
 						return xfer_fail(X, g_err);
 					}
 					resolve_map(map, unknown, nunknown);
@@ -2288,8 +2708,15 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 				for (int r = 0; r < 3; ++r) {
 					sd[r] = x[9] * (X.R[r * 3] * d[0] + X.R[r * 3 + 1] * d[1] + X.R[r * 3 + 2] * d[2]);
 				}
-				X.mss += sd[0] * sd[0] + sd[1] * sd[1] + sd[2] * sd[2];
 				const Corr c = correspond(F, F.fpos, i, F.fmn, F.W[W_MAXDIST]);
+				// Anime style: in reach, off the boundary, but facing away (an inner
+				// lip, an eyeball) is a part the anime face replaces, not an error.
+				if (!c.ok && F.W[W_STYLE] >= 1.0f && c.c.tri >= 0 && !on_boundary(F, c.c) &&
+						std::sqrt(c.c.d2) <= F.W[W_MAXDIST]) {
+					++X.replaced;
+					continue;
+				}
+				X.mss += sd[0] * sd[0] + sd[1] * sd[1] + sd[2] * sd[2];
 				double back[3] = { 0, 0, 0 };
 				if (c.ok) {
 					++X.reached;
@@ -2302,6 +2729,7 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 				}
 				for (int r = 0; r < 3; ++r) {
 					X.ess += (back[r] - sd[r]) * (back[r] - sd[r]);
+					X.ess_lab[md.label[i]][c.ok ? 1 : 0] += (back[r] - sd[r]) * (back[r] - sd[r]);
 				}
 				if (c.ok) {
 					for (int r = 0; r < 3; ++r) {
@@ -2329,8 +2757,9 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 										"look correct",
 											X.shape.c_str()));
 			}
-			X.error_mm = X.support ? float(std::sqrt(X.ess / X.support)) : 0.0f;
-			const double mag = X.support ? std::sqrt(X.mss / X.support) : 0.0;
+			const uint32_t judged = X.support - X.replaced;
+			X.error_mm = judged ? float(std::sqrt(X.ess / judged)) : 0.0f;
+			const double mag = judged ? std::sqrt(X.mss / judged) : 0.0;
 			const bool hits = F.hst == Fit::H_READY;
 			X.info = fmt("shape %s form %s actions %d units %d artists %d support %u reached %u unreached %u "
 						 "avatar_moved %u artist_moved %u avatar_matched %u avatar_unmatched %u magnitude_mm %.4f "
@@ -2339,6 +2768,13 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 					X.reached, X.support - X.reached, X.moved, X.art_moved, hits ? F.matched : 0u,
 					hits ? N - F.matched : 0u, mag, double(X.error_mm), mag > 0 ? double(X.error_mm) / mag : 0.0, X.reached ? std::sqrt(X.ess_r / X.reached) : 0.0,
 					X.mss_r > 0 ? std::sqrt(X.ess_r / X.mss_r) : 0.0);
+			X.info += fmt(" style %s replaced %u", F.W[W_STYLE] >= 1.0f ? "anime" : "reference", X.replaced);
+			X.info += " " + nr_info(F);
+			for (int r = 0; r < R_COUNT; ++r) {
+				if (X.ess > 0.0 && X.ess_lab[r][0] + X.ess_lab[r][1] > 0.0) {
+					X.info += fmt(" err_%s_unreached %.3f err_%s_reached %.3f", region_name(r), X.ess_lab[r][0] / X.ess, region_name(r), X.ess_lab[r][1] / X.ess);
+				}
+			}
 			X.deltas.resize(X.out.size());
 			for (size_t k = 0; k < X.out.size(); ++k) {
 				X.deltas[k] = float((double(X.out[k]) + X.fd.art[k]) / kMToMm);
@@ -2469,6 +2905,50 @@ int mesh_create(const float *xyz, int nv, const int32_t *tri, int nt) {
 	}
 	g_err.clear();
 	return put(K_MESH, m);
+}
+
+bool anime_shape(int mesh, const std::string &kind, std::vector<float> &deltas, std::string &why) {
+	const Mesh *m = get<Mesh>(mesh, K_MESH, "mesh");
+	if (!m) {
+		why = g_err;
+		return false;
+	}
+	if (kind != kAnimeKinds[0] && kind != kAnimeKinds[1]) {
+		why = g_err = kind + " is not an anime kind";
+		return false;
+	}
+	std::vector<double> out(m->m.v.size() * 3, 0.0);
+	if (!anime_eye_close(*m, kind == kAnimeKinds[0] ? 1 : -1, out, why)) {
+		g_err = why;
+		return false;
+	}
+	g_err.clear();
+	deltas.resize(out.size());
+	for (size_t k = 0; k < out.size(); ++k) {
+		deltas[k] = float(out[k] / kMToMm);
+	}
+	return true;
+}
+
+int mesh_set_roles(int mesh, const int32_t *roles, int n) {
+	Mesh *m = get<Mesh>(mesh, K_MESH, "mesh");
+	if (!m) {
+		return -1;
+	}
+	if (size_t(n) != m->m.v.size()) {
+		fail("hf_mesh_set_roles: %d roles for %zu vertices", n, m->m.v.size());
+		return -1;
+	}
+	m->role.assign(size_t(n), uint8_t(ROLE_SKIN));
+	for (int i = 0; i < n; ++i) {
+		if (roles[i] < ROLE_SKIN || roles[i] > ROLE_BROW) {
+			fail("hf_mesh_set_roles: vertex %d has role %d (0 skin, 1 eye, 2 lash, 3 iris, 4 brow)", i, roles[i]);
+			return -1;
+		}
+		m->role[size_t(i)] = uint8_t(roles[i]);
+	}
+	g_err.clear();
+	return n;
 }
 
 int mesh_add_shape(int mesh, const std::string &name, const float *deltas, int n3) {

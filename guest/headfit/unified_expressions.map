@@ -211,3 +211,14 @@ EyeClosedBrowOuterUpCorrectiveLeft <= corrective:EyeClosedLeft*BrowOuterUpLeft
 EyeClosedBrowOuterUpCorrectiveRight <= corrective:EyeClosedRight*BrowOuterUpRight
 EyeClosedSquintCorrectiveLeft <= corrective:EyeClosedLeft*EyeSquintLeft
 EyeClosedSquintCorrectiveRight <= corrective:EyeClosedRight*EyeSquintRight
+# Anime style (W_STYLE 1): lines below replace the reference line of the same name.
+# An anime face rarely opens its jaw: its mouth is a painted or sculpted slit with no interior.
+@anime JawOpen <= absent: anime style; an anime face's mouth rarely has an interior to open
+@anime MouthClosed <= absent: anime style; it closes the lips over an open jaw, and JawOpen is absent
+@anime MouthApeShape <= absent: anime style; it sums JawOpen, which is absent
+@anime JawMandibleRaise <= absent: anime style; it is JawOpen reversed, which is absent
+# An anime eye closes by its upper lid alone (plain close); the core derives it on the avatar mesh
+# from the host's vertex roles (hf_mesh_set_roles), not from ANNY's realistic blink.
+@anime EyeClosedLeft <= procedural:anime_eye_close_plain_left
+@anime EyeClosedRight <= procedural:anime_eye_close_plain_right
+@anime EyeClosed <= procedural:anime_eye_close_plain_left + procedural:anime_eye_close_plain_right
