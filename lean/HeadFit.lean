@@ -12,7 +12,7 @@ import HeadFit.SlangCodegen.Resample
 /-!
 # `HeadFit` — the head fit's residual kernels and their gradients
 
-RFD 2275's method as RFD 2277 places it in dress-on (`guest/headfit/`,
+RFD66606-2275's method as RFD66606-2277 places it in dress-on (`guest/headfit/`,
 `headfit.elf`): ANNY's MPFB2 head, shaped by its phenotype and local
 dials, placed by a similarity (6D rotation, translation, one scale), fitted
 to an avatar's face by point-to-surface distance plus sparse landmarks

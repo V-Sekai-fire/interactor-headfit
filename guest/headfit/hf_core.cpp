@@ -25,8 +25,8 @@ namespace hf {
 const float kWeightDefaults[W_COUNT] = {
 	1.0f, // W_FACE
 	1.0f, // W_MOUTH
-	0.2f, // W_NOSE: down-weighted (RFD 2275)
-	0.0f, // W_EYES: masked (RFD 2275)
+	0.2f, // W_NOSE: down-weighted (RFD66606-2275)
+	0.0f, // W_EYES: masked (RFD66606-2275)
 	0.5f, // W_CRANIUM
 	1.0f, // W_LANDMARK
 	1.0f, // W_PRIOR_PHEN
@@ -1037,13 +1037,13 @@ std::string model_tick(Model &md, Gas &gas) {
 
 // ---- the unified-expression map -------------------------------------------------
 //
-// unified_expressions.map (RFD 2275's catalog), one name per line:
+// unified_expressions.map (RFD66606-2275's catalog), one name per line:
 //   Name <= src [* mask:m]... [+ src [* mask:m]...]...   `*` binds tighter than `+`
 // (a factor is mask:left|right|upper|lower or a number, `jawForward * -1`)
 // where src is one of ANNY's 52 actions, another name of the map (a sum of
 // entries), artist:<avatar shape>, procedural:<kind>, corrective:A*B (A and B
 // names of the map), unit:<name> (MPFB2's expression unit, race-folded),
-// bone:<name> or baked:<skin> (RFD 2279), or
+// bone:<name> or baked:<skin> (RFD66606-2279), or
 // material:<property> (a material parameter driven instead of a shape); or
 //   Name <= absent: <reason>
 // `# ...` is a comment and `@stage N` starts a section.
@@ -1288,7 +1288,7 @@ bool parse_map(std::vector<Entry> &out, std::string &errs, bool anime = false) {
 }
 
 // Name resolution: a plain source is an ANNY action, else a name of the map;
-// corrective operands are names; procedural kinds are the seven RFD 2275
+// corrective operands are names; procedural kinds are the seven RFD66606-2275
 // derives. Each unknown source is one line of `unknown`. A sum that reaches
 // itself is a cycle and is reported too.
 void resolve_map(std::vector<Entry> &map, std::string &unknown, uint32_t &nunknown) {
@@ -2557,7 +2557,7 @@ bool hits_item(Fit &F, Gas &gas) {
 				if (hfg::norm(F.tnorm[j]) == 0.0) {
 					continue;
 				}
-				// RFD 2275: "a normal test rejects surfaces facing away" -- dot < 0.
+				// RFD66606-2275: "a normal test rejects surfaces facing away" -- dot < 0.
 				// A stricter cone (0.5, 60 degrees) rejected every triangle around a
 				// vertex on a crease, and the ray took the other lip's deltas
 				// (gates/11-headfit, the identity gate).

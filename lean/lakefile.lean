@@ -13,7 +13,7 @@ require Drape from "../../../2-contract/lbfgsb/lean"
 -- A sibling checkout in the manifest layout (contract-manifest-taskweft).
 require Anny from "../../../2-contract/anny-kernels/lean"
 
--- The head fit's kernels (RFD 2275/2277, headfit.elf): the ANNY head's
+-- The head fit's kernels (RFD66606-2275/2277, headfit.elf): the ANNY head's
 -- blend and similarity, the point-to-surface and landmark residuals, the
 -- prior, the df32 loss sum, their gradients, and the transfer's resample.
 -- A default target, so a bare `lake build` checks their native_decide pins.
