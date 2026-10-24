@@ -6,7 +6,7 @@ abstract: >-
   blend of ANNY's macro and local targets and its backward, the similarity
   (rigid + scale) and its VJPs, the point-to-surface and landmark residuals,
   the prior, a df32 energy sum, and the barycentric resample that carries a
-  fitted action onto the avatar (RFD 2275, RFD 2277). They are written here;
+  fitted action onto the avatar (RFD66606-2275, RFD66606-2277). They are written here;
   no ANNY source is copied. The phenotype anchor rule restates
   anny-creator's scripts/anny_coeffs.gd, checked against it in Godot
   (gates/11-headfit). lake exe emit_headfit writes the Slang and the pins;

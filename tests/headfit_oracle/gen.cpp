@@ -1,5 +1,5 @@
 // Head-fit oracle (Gate 11): host-native, double throughout. Restates round 0
-// of RFD 2275's head fit, as headfit's Lean kernels define it, and solves it
+// of RFD66606-2275's head fit, as headfit's Lean kernels define it, and solves it
 // with unmodified LBFGSpp 0.3.0, so the guest's float32/df32 pipeline and its
 // L-BFGS-B port are checked against an independent solve of the same problem.
 //

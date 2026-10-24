@@ -1,5 +1,5 @@
-// hf_core -- the head fit and the unified-expression transfer (RFD 2275's
-// method, RFD 2277 Phase A3), shared by headfit.elf (guest/headfit/main.cpp)
+// hf_core -- the head fit and the unified-expression transfer (RFD66606-2275's
+// method, RFD66606-2277 Phase A3), shared by headfit.elf (guest/headfit/main.cpp)
 // and the native check runner (tests/headfit/). No Eigen, no filesystem, no
 // Python: ANNY's CC0 sources arrive as text through data_put, and every
 // residual and gradient is a Lean-emitted kernel (kernels/headfit, cpp

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The head fit's kernels, from Lean to both targets (the kernels/anny/gen.sh
-# shape), with no Python anywhere (RFD 2239; RFD 2277's ruling).
+# shape), with no Python anywhere (RFD66606-2239; RFD66606-2277's ruling).
 #
 #   kernels/headfit/gen.sh               # emit from Lean, then cpp + spirv + embed
 #   kernels/headfit/gen.sh --no-emit     # use the committed slang/ (no lake)

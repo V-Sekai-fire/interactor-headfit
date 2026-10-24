@@ -1,5 +1,5 @@
 // headfit.elf -- the ANNY head fit and the unified-expression transfer (RFD
-// 2277 Phase A3, RFD 2275's method) as a sandbox guest: hf_core behind the
+// 2277 Phase A3, RFD66606-2275's method) as a sandbox guest: hf_core behind the
 // Godot-shaped API, so the same ELF runs under Godot and under the Unity
 // sandbox. This TU is the only one that sees api.hpp; hf_core and below are
 // std types and link into tests/headfit's native runner too.

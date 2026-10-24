@@ -1,5 +1,5 @@
 # Pin each head-fit kernel's emitted Slang into its Lean module (the
-# kernels/anny/pin.py pattern, in Elixir: no Python, RFD 2239).
+# kernels/anny/pin.py pattern, in Elixir: no Python, RFD66606-2239).
 #
 # Every lean/HeadFit/SlangCodegen/<Module>.lean carries a block
 #

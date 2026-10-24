@@ -1,5 +1,5 @@
 # Embed the head fit's SPIR-V into a C++ header (kernels/embed_spv.py's
-# output shape, in Elixir: no Python, RFD 2239). The guest has no
+# output shape, in Elixir: no Python, RFD66606-2239). The guest has no
 # filesystem, so a GPU path would ship its kernels inside the ELF; each
 # .spv becomes one `static const uint8_t` array plus a name -> bytes table.
 #

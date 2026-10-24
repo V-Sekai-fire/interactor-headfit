@@ -856,7 +856,7 @@ int mode_identity(Ctx &c) {
 		hf::model_action(c.model, act, ref);
 		if (!one_transfer(c.fit, act, d, e, info, why)) {
 			// No support in the body region (tongueOut: the tongue is a helper
-			// group, RFD 2275's next stage) is the right answer; any other
+			// group, RFD66606-2275's next stage) is the right answer; any other
 			// refusal is a failure.
 			const bool empty = why.find("empty support (0 model vertices") != std::string::npos;
 			std::printf("identity %s refused%s %s\n", act, empty ? "_empty" : "", why.c_str());

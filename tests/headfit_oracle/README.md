@@ -1,6 +1,6 @@
 # Head-fit oracle (Gate 11; host-native)
 
-`gen.cpp` restates round 0 of the head fit (RFD 2275's method, `guest/headfit`)
+`gen.cpp` restates round 0 of the head fit (RFD66606-2275's method, `guest/headfit`)
 in double, term for term as the Lean kernels define it, and solves it with
 unmodified LBFGSpp 0.3.0:
 
