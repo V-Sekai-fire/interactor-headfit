@@ -1,0 +1,26 @@
+# The ANNY body model's kernels, by their Lean/Slang module names, each with
+# the targets it is compiled for (both: cpp, the in-guest CPU path, and
+# spirv, the GPU path over rd_compute). None shares group memory.
+# Forward, in dispatch order:
+anny_blend both
+anny_csr_gemv3 both
+anny_fk both
+anny_lbs both
+anny_vert_residual both
+# Backward (anny_csr_gemv3 runs again, on the regressor's transpose):
+anny_lbs_backward_bone both
+anny_lbs_backward_bind both
+anny_fk_backward both
+anny_blend_backward both
+anny_capsule_depth both
+anny_fk_local both
+anny_ground both
+# SOMA-X per-frame posing (ANNY identity, correctives), in dispatch order;
+# soma_jump runs once per pointer-jumping round, anny_lbs skins last:
+soma_orient both
+soma_jump both
+soma_twist both
+soma_expand both
+soma_skin both
+soma_corr_l1 both
+soma_corr_l2 both
