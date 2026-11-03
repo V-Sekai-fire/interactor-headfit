@@ -15,6 +15,10 @@ require RotationStar from "../vendor/solve/core/rotation-star/lean"
 require Anny from "../vendor/anny-kernels/lean"
 
 
+-- Anny requires it, and a package must list every dependency of a dependency (same pin as contract-anny-kernels).
+require RotationStar from git
+  "https://github.com/V-Sekai-fire/contract-rotation-star.git" @ "b70e19a627b3e6de19c4b52359406f771fae51c0" / "lean"
+
 -- The head fit's kernels (RFD66606-2275/2277, headfit.elf): the ANNY head's
 -- blend and similarity, the point-to-surface and landmark residuals, the
 -- prior, the df32 loss sum, their gradients, and the transfer's resample.
