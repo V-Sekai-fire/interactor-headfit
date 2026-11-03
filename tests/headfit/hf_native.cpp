@@ -82,8 +82,7 @@ bool run(int h, const char *what, bool echo, std::string *last = nullptr) {
 			std::printf("FAIL %s: %s\n", what, s.c_str());
 			return false;
 		}
-		if (echo && (s.find(" start ") != std::string::npos || s.find(" done ") != std::string::npos ||
-							arg("verbose") == "1")) {
+		if (echo && (s.find(" start ") != std::string::npos || s.find(" done ") != std::string::npos || arg("verbose") == "1")) {
 			std::printf("tick %s\n", s.c_str());
 		}
 		if (s.rfind("DONE", 0) == 0) {
