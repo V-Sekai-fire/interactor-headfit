@@ -444,8 +444,11 @@ struct Marks {
 	std::vector<int32_t> model_ids, avatar_ids;
 };
 
-
-enum Kind { K_MESH, K_MODEL, K_MARKS, K_FIT, K_XFER };
+enum Kind { K_MESH,
+	K_MODEL,
+	K_MARKS,
+	K_FIT,
+	K_XFER };
 struct Handle {
 	Kind kind;
 	std::shared_ptr<void> p;
@@ -582,9 +585,9 @@ std::vector<MacroRow> macro_rows() {
 	const char *R[3] = { "african", "asian", "caucasian" };
 	auto file_age = [](int a) { return std::string(a == 0 ? "baby" : (a == 1 ? "baby" : (a == 2 ? "child" : (a == 3 ? "young" : "old")))); };
 	// ANNY's macrodetails order (full_model.py): universal, race, height, proportions.
-	for (int g = 0; g < 2; ++g)
-		for (int a = 0; a < 5; ++a)
-			for (int m = 0; m < 3; ++m)
+	for (int g = 0; g < 2; ++g) {
+		for (int a = 0; a < 5; ++a) {
+			for (int m = 0; m < 3; ++m) {
 				for (int w = 0; w < 3; ++w) {
 					MacroRow r;
 					r.name = fmt("mac_universal_%s-%s-%s-%s", G[g], A[a], M[m], W[w]);
@@ -593,7 +596,10 @@ std::vector<MacroRow> macro_rows() {
 					r.newborn = a == 0;
 					rows.push_back(r);
 				}
-	for (int g = 0; g < 2; ++g)
+			}
+		}
+	}
+	for (int g = 0; g < 2; ++g) {
 		for (int a = 0; a < 5; ++a) {
 			MacroRow r;
 			r.name = fmt("mac_race_%s-%s", G[g], A[a]);
@@ -605,10 +611,11 @@ std::vector<MacroRow> macro_rows() {
 			r.newborn = a == 0;
 			rows.push_back(r);
 		}
-	for (int g = 0; g < 2; ++g)
-		for (int a = 0; a < 5; ++a)
-			for (int m = 0; m < 3; ++m)
-				for (int w = 0; w < 3; ++w)
+	}
+	for (int g = 0; g < 2; ++g) {
+		for (int a = 0; a < 5; ++a) {
+			for (int m = 0; m < 3; ++m) {
+				for (int w = 0; w < 3; ++w) {
 					for (int h = 0; h < 2; ++h) {
 						MacroRow r;
 						r.name = fmt("mac_height_%s-%s-%s-%s-%s", G[g], A[a], M[m], W[w], H[h]);
@@ -617,10 +624,14 @@ std::vector<MacroRow> macro_rows() {
 						r.newborn = a == 0;
 						rows.push_back(r);
 					}
-	for (int g = 0; g < 2; ++g)
-		for (int a = 2; a < 5; ++a)
-			for (int m = 0; m < 3; ++m)
-				for (int w = 0; w < 3; ++w)
+				}
+			}
+		}
+	}
+	for (int g = 0; g < 2; ++g) {
+		for (int a = 2; a < 5; ++a) {
+			for (int m = 0; m < 3; ++m) {
+				for (int w = 0; w < 3; ++w) {
 					for (int p = 0; p < 2; ++p) {
 						MacroRow r;
 						r.name = fmt("mac_proportions_%s-%s-%s-%s-%s", G[g], A[a], M[m], W[w], Pp[p]);
@@ -628,6 +639,10 @@ std::vector<MacroRow> macro_rows() {
 						r.slots = { g, 2 + a, 7 + m, 10 + w, 15 + p };
 						rows.push_back(r);
 					}
+				}
+			}
+		}
+	}
 	return rows;
 }
 
@@ -656,7 +671,15 @@ struct Model {
 	uint32_t files_macro = 0, files_dial = 0, files_facial = 0;
 	uint64_t lines_macro = 0, lines_dial = 0, lines_facial = 0;
 	// The job.
-	enum State { M_LOAD, M_LABELS, M_REGION, M_MACRO, M_DIALS, M_FACIAL, M_LIP, M_DONE, M_FAILED } state = M_LOAD;
+	enum State { M_LOAD,
+		M_LABELS,
+		M_REGION,
+		M_MACRO,
+		M_DIALS,
+		M_FACIAL,
+		M_LIP,
+		M_DONE,
+		M_FAILED } state = M_LOAD;
 	uint64_t base_gen = 0;
 	uint32_t cursor = 0;
 	std::string err;
@@ -727,7 +750,6 @@ void phen_gradient(const Model &md, const float *phen, const float *dco, double 
 		}
 	}
 }
-
 
 // The rows a fit needs at a phenotype: a macro row whose every slot has a
 // non-zero weight or a non-zero derivative (any other row has coefficient 0
@@ -1056,12 +1078,21 @@ std::string unit_key(const char *race, const std::string &name) {
 	return std::string("mpfb2/targets/expression/units/") + race + "/" + name + ".target";
 }
 
-const char *const kProcedural[7] ={ "out_step1", "out_step2", "roll", "twist_left", "twist_right", "flat", "squish" };
+const char *const kProcedural[7] = { "out_step1", "out_step2", "roll", "twist_left", "twist_right", "flat", "squish" };
 // The anime style's own kinds, computed on the avatar mesh from its roles (hf_mesh_set_roles).
 const char *const kAnimeKinds[2] = { "anime_eye_close_plain_left", "anime_eye_close_plain_right" };
 
 struct Term {
-	enum K { ACTION, ENTRY, UNIT, ARTIST, PROCEDURAL, CORRECTIVE, BONE, BAKED, MATERIAL, ABSENT } k = ACTION;
+	enum K { ACTION,
+		ENTRY,
+		UNIT,
+		ARTIST,
+		PROCEDURAL,
+		CORRECTIVE,
+		BONE,
+		BAKED,
+		MATERIAL,
+		ABSENT } k = ACTION;
 	std::string ref; // the action, entry, shape, kind, pair, bone, skin or reason
 	std::vector<std::string> masks; // left, right, upper, lower; applied in order
 	double scale = 1.0; // `* <number>`: a linear source at that weight
@@ -1374,7 +1405,6 @@ double smooth01(double u) {
 	return t * t * (3.0 - 2.0 * t);
 }
 
-
 // ---- the fit ------------------------------------------------------------------------
 
 struct Fit;
@@ -1391,7 +1421,19 @@ struct Fit;
 // quarter of the work. A pose (the correspondence search, the reports, the
 // transfer) runs on every vertex.
 struct Pipe {
-	enum Phase { IDLE, COEF, COMPACT, BLEND, SIM, SURF, MARKPRIOR, SUMS, SIMBP, SIMBV, BLENDBW, GRAD, READY } ph = IDLE;
+	enum Phase { IDLE,
+		COEF,
+		COMPACT,
+		BLEND,
+		SIM,
+		SURF,
+		MARKPRIOR,
+		SUMS,
+		SIMBP,
+		SIMBV,
+		BLENDBW,
+		GRAD,
+		READY } ph = IDLE;
 	bool grad = false, sub = false;
 	uint32_t cur = 0;
 	uint32_t PE = 0; // the vertices this pass computes (the region, or the support)
@@ -1433,8 +1475,18 @@ struct Fit {
 	VecCpu vec;
 	Lbfgsb drv{ vec };
 	Lbfgsb::Status st = Lbfgsb::FAIL;
-	enum State { S_BVH, S_GEOM, S_INIT_POSE, S_INIT_SIM, S_ROUND_POSE, S_ROUND_NORMALS, S_ROUND_CORR, S_ROUND_BEGIN,
-		S_RUNNING, S_EVAL, S_DONE, S_FAILED } state = S_BVH;
+	enum State { S_BVH,
+		S_GEOM,
+		S_INIT_POSE,
+		S_INIT_SIM,
+		S_ROUND_POSE,
+		S_ROUND_NORMALS,
+		S_ROUND_CORR,
+		S_ROUND_BEGIN,
+		S_RUNNING,
+		S_EVAL,
+		S_DONE,
+		S_FAILED } state = S_BVH;
 	uint32_t cur = 0;
 	int round = 0, rounds = 0;
 	int evals = 0, accepts = 0, stalls = 0;
@@ -1449,7 +1501,16 @@ struct Fit {
 	double f = 0.0;
 	// The final pose and the transfer's hits, made once, when a transfer asks.
 	Pipe rp;
-	enum HState { H_NONE, H_POSE, H_NR_SETUP, H_NR_NORMALS, H_NR_CORR, H_NR_SOLVE, H_NORMALS, H_BVH, H_RAYS, H_READY } hst = H_NONE;
+	enum HState { H_NONE,
+		H_POSE,
+		H_NR_SETUP,
+		H_NR_NORMALS,
+		H_NR_CORR,
+		H_NR_SOLVE,
+		H_NORMALS,
+		H_BVH,
+		H_RAYS,
+		H_READY } hst = H_NONE;
 	std::vector<float> fpos;
 	std::vector<hfg::V3> fmn;
 	hfg::Mesh pmesh; // the posed model (pbvh points into it)
@@ -2247,7 +2308,6 @@ bool term_fields(Fit &F, const std::vector<Entry> &map, const std::map<std::stri
 	return true;
 }
 
-
 // ---- reports ------------------------------------------------------------------
 
 struct RegionStat {
@@ -2591,7 +2651,13 @@ struct Xfer {
 	std::shared_ptr<Fit> F;
 	std::string shape;
 	bool field = false; // a given model-space field (the identity gate), not a name
-	enum State { X_FIELDS, X_HITS, X_RESAMPLE, X_ERROR, X_FINISH, X_DONE, X_FAILED } st = X_FIELDS;
+	enum State { X_FIELDS,
+		X_HITS,
+		X_RESAMPLE,
+		X_ERROR,
+		X_FINISH,
+		X_DONE,
+		X_FAILED } st = X_FIELDS;
 	Fields fd;
 	std::vector<float> out; // N*3 mm
 	uint32_t cur = 0;
@@ -2638,8 +2704,7 @@ std::string xfer_item(Xfer &X, Gas &gas) {
 					}
 					auto it = by.find(X.shape);
 					if (it == by.end()) {
-						return xfer_fail(X, fmt("hf_transfer: %s is neither an ANNY action nor a name in unified_expressions.map",
-													X.shape.c_str()));
+						return xfer_fail(X, fmt("hf_transfer: %s is neither an ANNY action nor a name in unified_expressions.map", X.shape.c_str()));
 					}
 					terms = map[it->second].terms;
 					X.form = map[it->second].form;
@@ -2801,7 +2866,6 @@ std::string xfer_tick(Xfer &X, Gas &gas) {
 	}
 	return fmt("RUNNING transfer %s state %d item %u", X.shape.c_str(), int(X.st), X.cur);
 }
-
 
 } // namespace
 
@@ -3531,7 +3595,7 @@ bool model_mesh(int model, const double phen[6], std::vector<float> &xyz_m, std:
 	for (int a = 0; a < 6; ++a) {
 		ph[a] = float(phen[a]);
 	}
-	std::vector<float> dials(size_t(2) * md->L, 0.0f), c, v(size_t(md->P) * 3);
+	std::vector<float> dials(size_t(2) * md->L, 0.0f), c, v(size_t(md -> P) * 3);
 	coefficients(*md, ph, dials.data(), c);
 	hfk::blend(md->P, md->NB, md->base.data(), md->blend.data(), c.data(), v.data());
 	xyz_m.resize(v.size());

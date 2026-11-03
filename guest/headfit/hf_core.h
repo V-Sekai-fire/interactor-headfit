@@ -45,9 +45,14 @@ const char *region_name(int r);
 // The loss weights hf_solve takes, in this order; a shorter array keeps the
 // defaults for the rest.
 enum Weight : int {
-	W_FACE, W_MOUTH, W_NOSE, W_EYES, W_CRANIUM, // per-region point-to-surface weights
+	W_FACE,
+	W_MOUTH,
+	W_NOSE,
+	W_EYES,
+	W_CRANIUM, // per-region point-to-surface weights
 	W_LANDMARK, // the landmark term, spread over the marks
-	W_PRIOR_PHEN, W_PRIOR_DIAL, // the prior on the phenotype (to 0.5) and dials (to 0)
+	W_PRIOR_PHEN,
+	W_PRIOR_DIAL, // the prior on the phenotype (to 0.5) and dials (to 0)
 	W_POINT, // the point-to-point share next to point-to-plane
 	W_ROUNDS, // correspondence rounds
 	W_ITERS, // L-BFGS-B iterations per round
@@ -79,7 +84,11 @@ std::string data_report();
 int mesh_create(const float *xyz, int nv, const int32_t *tri, int nt);
 int mesh_add_shape(int mesh, const std::string &name, const float *deltas, int n3);
 // A role per vertex for the anime style's procedural shapes; returns n, or -1.
-enum Role : int32_t { ROLE_SKIN = 0, ROLE_EYE = 1, ROLE_LASH = 2, ROLE_IRIS = 3, ROLE_BROW = 4 };
+enum Role : int32_t { ROLE_SKIN = 0,
+	ROLE_EYE = 1,
+	ROLE_LASH = 2,
+	ROLE_IRIS = 3,
+	ROLE_BROW = 4 };
 int mesh_set_roles(int mesh, const int32_t *roles, int n);
 // One anime procedural kind on the mesh alone (no fit): dense deltas, metres.
 bool anime_shape(int mesh, const std::string &kind, std::vector<float> &deltas, std::string &why);
