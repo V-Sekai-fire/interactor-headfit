@@ -7,15 +7,13 @@ package HeadFit where
 require LeanSlang from git
   "https://github.com/V-Sekai-fire/contract-lean-slang.git" @ "60532aef8ed70cc669ecab481182d0636c9e1ac3"
 
--- A sibling checkout in the manifest layout (contract-manifest-taskweft).
-require Drape from "../../../2-contract/lbfgsb/lean"
+-- The solvers come from sinew-mocap/solve, which owns them (git subtree, vendor/solve); the upstreams moved to V-Sekai-archive.
+require Drape from "../vendor/solve/core/lbfgsb/lean"
+require RotationStar from "../vendor/solve/core/rotation-star/lean"
 
--- A sibling checkout in the manifest layout (contract-manifest-taskweft).
-require Anny from "../../../2-contract/anny-kernels/lean"
+-- contract-anny-kernels, a git subtree (vendor/anny-kernels). Its own requires of Drape and RotationStar resolve to the two above.
+require Anny from "../vendor/anny-kernels/lean"
 
--- Anny requires it, and a package must list every dependency of a dependency (same pin as contract-anny-kernels).
-require RotationStar from git
-  "https://github.com/V-Sekai-fire/contract-rotation-star.git" @ "b70e19a627b3e6de19c4b52359406f771fae51c0" / "lean"
 
 -- The head fit's kernels (RFD66606-2275/2277, headfit.elf): the ANNY head's
 -- blend and similarity, the point-to-surface and landmark residuals, the
